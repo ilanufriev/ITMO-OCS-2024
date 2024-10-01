@@ -66,7 +66,7 @@ double netz::math::DotProduct(
 		throw std::invalid_argument(ErrMsg(ERR_MSG_SIZES_DIFFER));
 	}
 
-	return std::transform_reduce(std::execution::par, v1.cbegin(),
+	return std::transform_reduce(std::execution::seq, v1.cbegin(),
 			v1.cend(), v2.cbegin(),
 			0.0, std::plus<>(),
 			std::multiplies<>());
@@ -80,7 +80,7 @@ double netz::math::ErrorEstimation(
 		throw std::invalid_argument(ErrMsg(ERR_MSG_SIZES_DIFFER));
 	}
 
-	return 0.5 * std::transform_reduce(std::execution::par,
+	return 0.5 * std::transform_reduce(std::execution::seq,
 			expected_values.cbegin(), expected_values.cend(),
 			output_values.cbegin(), 0.0, std::plus<>(),
 			std::minus<>() );

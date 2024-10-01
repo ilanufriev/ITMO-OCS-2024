@@ -13,67 +13,67 @@ double GetRandomDouble() {
 }
 
 netz::Neuron& netz::Neuron::AddInput(double input) {
-	__inputs.push_back(input);
-	__weights.push_back(GetRandomDouble());
-	__needs_recalculation = true;
+	inputs__.push_back(input);
+	weights__.push_back(GetRandomDouble());
+	needs_recalculation__ = true;
 
 	return *this;
 }
 
 netz::Neuron& netz::Neuron::SetInput(size_t index, double input) {
-	if (index >= __inputs.size()) {
+	if (index >= inputs__.size()) {
 		throw std::invalid_argument(ErrMsg(ERR_MSG_INDEX_OOB));
 	}
-	__inputs[index] = input;
-	__needs_recalculation = true;
+	inputs__[index] = input;
+	needs_recalculation__ = true;
 
 	return *this;
 }
 
 netz::Neuron& netz::Neuron::ResetInputs() {
-	__inputs.clear();
-	__needs_recalculation = true;
+	inputs__.clear();
+	needs_recalculation__ = true;
 
 	return *this;
 }
 
 double netz::Neuron::GetOutput() const {
-	if (__needs_recalculation) {
-		__output = __activation_func(
-			math::DotProduct(__inputs, __weights));
-		__needs_recalculation = false;
+	if (needs_recalculation__) {
+		output__ = activation_func__(
+			math::DotProduct(inputs__, weights__));
+		needs_recalculation__ = false;
 	}
 
-	return __output;
+	return output__;
 }
 
 netz::Neuron& netz::Neuron::SetWeight(size_t index, double weight) {
-	if (index >= __weights.size()) {
+	if (index >= weights__.size()) {
 		throw std::invalid_argument(ErrMsg(ERR_MSG_INDEX_OOB));
 	}
 
-	__weights[index] = weight;
-	__needs_recalculation = true;
+	weights__[index] = weight;
+	needs_recalculation__ = true;
 
 	return *this;
 }
 
 size_t netz::Neuron::InputSize() const {
-	return __inputs.size();
+	return inputs__.size();
 }
 
 double netz::Neuron::GetInput(size_t index) const {
-	if (index >= __inputs.size()) {
+	if (index >= inputs__.size()) {
 		throw std::invalid_argument(ErrMsg(ERR_MSG_INDEX_OOB));
 	}
 
-	return __inputs.at(index);
+	return inputs__.at(index);
 }
 
 double netz::Neuron::GetWeight(size_t index) const {
-	if (index >= __weights.size()) {
+	if (index >= weights__.size()) {
 		throw std::invalid_argument(ErrMsg(ERR_MSG_INDEX_OOB));
 	}
 
-	return __weights.at(index);
+	return weights__.at(index);
 }

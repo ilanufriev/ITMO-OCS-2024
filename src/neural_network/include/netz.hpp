@@ -34,16 +34,16 @@ public:
 private:
 	void Update();
 
-	std::vector<Layer>	__layers;
-	std::vector<double>	__inputs;
-	mutable bool		__needs_recalculation = true;
+	std::vector<Layer>	layers__;
+	std::vector<double>	inputs__;
+	mutable bool		needs_recalculation__ = true;
 };
 
 class netz::Neuron {
 public:
 	Neuron() = delete;
 	Neuron(std::function<double(double)> activation_func)
-		: __activation_func(activation_func) {}
+		: activation_func__(activation_func) {}
 
 	Neuron& AddInput(double input);
 	Neuron& SetInput(size_t index, double input);
@@ -54,17 +54,17 @@ public:
 	double GetOutput() const;
 	size_t InputSize() const;
 private:
-	std::vector<double>		__inputs;
-	std::vector<double>		__weights;
-	std::function<double(double)>	__activation_func;
-	mutable double			__output;
-	mutable bool			__needs_recalculation = true;
+	std::vector<double>		inputs__;
+	std::vector<double>		weights__;
+	std::function<double(double)>	activation_func__;
+	mutable double			output__;
+	mutable bool			needs_recalculation__ = true;
 };
 
 template<typename NumberContainer>
 void netz::Netzwerk::AdjustWeights(double alpha,
 		const NumberContainer& expected_values) {
-	Layer *next_layer = &__layers.back();
+	Layer *next_layer = &layers__.back();
 
 	std::vector<double> deltas_next;
 
@@ -85,8 +85,8 @@ void netz::Netzwerk::AdjustWeights(double alpha,
 	}
 
 	// Потом для всех остальных
-	for (	auto iter = __layers.rbegin() + 1;
-		iter != __layers.rend(); iter++) {
+	for (	auto iter = layers__.rbegin() + 1;
+		iter != layers__.rend(); iter++) {
 		Layer& l = *iter;
 		std::vector<double> deltas;
 
@@ -115,5 +115,5 @@ void netz::Netzwerk::AdjustWeights(double alpha,
 		next_layer = &l;
 	}
 
-	__needs_recalculation = true;
+	needs_recalculation__ = true;
 }

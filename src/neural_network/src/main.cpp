@@ -23,7 +23,7 @@ constexpr size_t INPUT_COUNT		= INPUT_HEIGHT * INPUT_HEIGHT;
 constexpr size_t CIRCLE_OUTPUT		= 0;
 constexpr size_t SQUARE_OUTPUT		= 1;
 constexpr size_t TRIANGLE_OUTPUT	= 2;
-constexpr size_t EPOCH_LIMIT		= 50;
+constexpr size_t EPOCH_LIMIT		= 1000;
 
 const std::vector<double> CIRCLE_EXPECTED_OUTPUT   = { 1, 0, 0 };
 const std::vector<double> SQUARE_EXPECTED_OUTPUT   = { 0, 1, 0 };
@@ -136,13 +136,16 @@ int main(int argc, char **argv) {
 					<< argv[ARGV_DUMP_FILE] << std::endl;
 			return 1;
 		}
+	} else if (cmd != CMD_RUN) {
+		std::cerr 	<< "Unknown command.\n";
+		return 1;
 	}
 
 	in_file.open(argv[ARGV_IN_FILE]);
 
 	if (!in_file) {
 		std::cerr 	<< "Could not open file "
-				<< argv[ARGV_DUMP_FILE] << std::endl;
+				<< argv[ARGV_IN_FILE] << std::endl;
 		return 1;
 	}
 
@@ -168,7 +171,10 @@ int main(int argc, char **argv) {
 		netz.AddInput(0);
 	}
 
-	netz	.AddLayer(INPUT_HEIGHT * 2)
+	netz	.AddLayer(3 * 2)
+		.AddLayer(3 * 2)
+		.AddLayer(3 * 2)
+		.AddLayer(3 * 2)
 		.AddLayer(3);
 
 	double alpha = 0.2;
@@ -180,8 +186,6 @@ int main(int argc, char **argv) {
 
 	for (size_t epoch = 0; epoch < EPOCH_LIMIT; epoch++) {
 		std::cout << "Epoch: " << epoch << std::endl;
-
-
 		for (const auto& figure : circle_bitmaps) {
 			for (size_t i = 0; i < INPUT_COUNT; i++) {
 				netz.SetInput(
@@ -254,13 +258,13 @@ skip:
 
 	switch (max_iter - outputs.begin()) {
 		case CIRCLE_OUTPUT:
-			std::cout << "It's a circle!" << std::endl;
+			std::cout << "circle" << std::endl;
 			break;
 		case SQUARE_OUTPUT:
-			std::cout << "It's a square!" << std::endl;
+			std::cout << "square" << std::endl;
 			break;
 		case TRIANGLE_OUTPUT:
-			std::cout << "It's a triangle!" << std::endl;
+			std::cout << "triangle" << std::endl;
 			break;
 	}
 

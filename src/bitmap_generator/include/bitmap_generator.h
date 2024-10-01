@@ -6,13 +6,6 @@
 
 namespace bitmap_generator {
 
-enum FigureType {
-	Circle,
-	Square,
-	Triangle,
-	FigureCount,
-};
-
 constexpr int SAMPLE_COUNT = 128;
 constexpr int SAMPLE_RES_WIDTH = 7;
 constexpr int SAMPLE_RES_HEIGHT = 7;
