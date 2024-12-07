@@ -39,9 +39,9 @@ Bitmap GenerateNoisyBitmap(Bitmap base_bitmap, double noise_percent);
 /// 		инвертирован (см. GenerateNoisyBitmap).
 /// @return	Поток вывода.
 std::ostream& GenerateBitmapArraySourceCode(std::ostream& out,
-		const std::string& array_def,
-		Bitmap base_bitmap,
-		double noise_percent);
+        const std::string& array_def,
+        Bitmap base_bitmap,
+        double noise_percent);
 
 std::ostream& operator<<(std::ostream& out, const Bitmap& bitmap);
 
