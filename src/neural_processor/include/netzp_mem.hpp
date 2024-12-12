@@ -1,12 +1,7 @@
 #ifndef _NETZP_MEM_H_
 #define _NETZP_MEM_H_
 
-#include "sysc/communication/sc_interface.h"
-#include "sysc/communication/sc_mutex.h"
-#include "sysc/communication/sc_prim_channel.h"
-#include "sysc/communication/sc_signal_ifs.h"
-#include "sysc/kernel/sc_module.h"
-#include "sysc/kernel/sc_module_name.h"
+#include "netzp_config.hpp"
 #include <systemc>
 #include <vector>
 
@@ -17,15 +12,18 @@ constexpr unsigned int KBYTE = BYTE  * 1024;
 constexpr unsigned int MBYTE = KBYTE * 1024;
 constexpr unsigned int GBYTE = MBYTE * 1024;
 
-struct MemData {
-    using data_t = sc_dt::sc_uint<8>;
-    using addr_t = sc_dt::sc_uint<16>;
+using mem_data_t = sc_dt::sc_uint<8>;
+using mem_addr_t = sc_dt::sc_uint<16>;
+using mem_master_id_t = sc_dt::sc_uint<8>;
 
-    addr_t            data_addr;
-    data_t            data_wr;
-    bool              w_en;
-    bool              r_en;
-    data_t            data_rd;
+struct MemData {
+    mem_addr_t            data_addr;
+    mem_data_t            data_wr;
+    bool                  w_en_s;
+    bool                  r_en_s;
+    bool                  w_en_m;
+    bool                  r_en_m;
+    mem_data_t            data_rd;
 
     MemData();
 
@@ -36,35 +34,57 @@ struct MemData {
 
 std::ostream& operator << (std::ostream& out, const MemData& signals);
 
-class MemBusIf : public virtual sc_core::sc_interface {
-public:
-    using data_t = MemData::data_t;
-    using addr_t = MemData::addr_t;
-
-    virtual MemData& GetDataRW() = 0;
-    virtual const MemData& GetDataRO() const = 0;
+enum class MemOperationType {
+    WRITE,
+    READ,
+    NONE
 };
 
-class MemChannel final : public MemBusIf, public sc_core::sc_module {
-private:
-    MemData data_;
-public:
-    MemChannel(sc_core::sc_module_name const &name);
-
-    virtual MemData& GetDataRW() override;
-    virtual const MemData& GetDataRO() const override;
+enum class MemOperationStatus {
+    OK,
+    ERROR,
+    NONE
 };
+
+struct MemRequest {
+    mem_master_id_t  master_id;
+    MemOperationType op_type;
+    mem_addr_t       addr;
+    mem_data_t       data_wr;
+
+    MemRequest();
+
+    MemRequest(const MemRequest& other);
+
+    bool operator == (const MemRequest& other) const;
+};
+
+std::ostream& operator << (std::ostream& out, const MemRequest& req);
+
+struct MemReply {
+    mem_master_id_t    master_id;
+    MemOperationType   op_type;
+    MemOperationStatus status;
+    mem_data_t         data_rd;
+
+    MemReply();
+
+    MemReply(const MemReply& other);
+
+    bool operator == (const MemReply& other) const;
+};
+
+std::ostream& operator << (std::ostream& out, const MemReply& reply);
 
 class Mem : public sc_core::sc_module {
 private:
     static constexpr unsigned int MEMSIZE = 64 * KBYTE;
-    using data_t = MemData::data_t;
-    using addr_t = MemData::addr_t;
-
-    data_t data_rd_next_;
-    std::vector<data_t>  mem_;
+    mem_data_t               data_rd_next_;
+    bool                     ack_next_;
+    std::vector<mem_data_t>  mem_;
 
     void AtClk();
+    void AtAck();
     void MemAccess();
 
 public:
@@ -72,11 +92,65 @@ public:
     sc_core::sc_in<bool>          clk;
     sc_core::sc_in<bool>          rst;
 
-    sc_core::sc_port<MemBusIf, 0> port;
+    sc_core::sc_in<mem_data_t>    data_wr;
+    sc_core::sc_in<mem_addr_t>    addr;
+    sc_core::sc_in<bool>          w_en;
+    sc_core::sc_in<bool>          r_en;
+    sc_core::sc_in<bool>          ack_in;
+
+    sc_core::sc_out<bool>         ack_out;
+    sc_core::sc_out<mem_data_t>   data_rd;
 
     void Dump(std::ostream& out) const;
 
     explicit Mem(sc_core::sc_module_name const&, int memsize = MEMSIZE);
+};
+
+class MemController : public sc_core::sc_module {
+private:
+    static constexpr long unsigned int MAX_CONNECTIONS = CONFIG_MEMORY_CONTROLLER_MAX_CONNECTIONS;
+
+    mem_data_t data_wr_next_;
+    mem_addr_t addr_next_;
+    bool       w_en_next_;
+    bool       r_en_next_;
+    bool       ack_out_next_;
+
+    bool access_granted_next_[MAX_CONNECTIONS];
+    MemRequest        request_;
+    MemReply          reply_next_;
+
+    sc_dt::sc_uint<8> current_access_next_;
+    sc_core::sc_signal<sc_dt::sc_uint<8>> current_access_;
+
+public:
+    sc_core::sc_in<bool>           clk;
+    sc_core::sc_in<bool>           rst;
+
+    // Memory side
+    sc_core::sc_out<mem_data_t>    data_wr;
+    sc_core::sc_out<mem_addr_t>    addr;
+    sc_core::sc_out<bool>          w_en;
+    sc_core::sc_out<bool>          r_en;
+    sc_core::sc_out<bool>          ack_out;
+
+    sc_core::sc_in<bool>           ack_in;
+    sc_core::sc_in<mem_data_t>     data_rd;
+
+    // Masters side
+    sc_core::sc_in<bool>                                   access_request[MAX_CONNECTIONS];
+    sc_core::sc_out<bool>                                  access_granted[MAX_CONNECTIONS];
+    sc_core::sc_port<sc_core::sc_signal_in_if<MemRequest>> requests_in[MAX_CONNECTIONS];
+    sc_core::sc_port<sc_core::sc_signal_out_if<MemReply>>  replies_out[MAX_CONNECTIONS];
+
+public:
+    explicit MemController(sc_core::sc_module_name const&);
+
+    void AtClk();
+    void AtRequest();
+    void AtAccessRequest();
+    void AtAck();
+    void AtCounter();
 };
 
 } // namespace netzp
