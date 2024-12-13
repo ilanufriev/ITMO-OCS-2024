@@ -1,7 +1,11 @@
 #include "netzp_mem.hpp"
+#include "netzp_config.hpp"
+#include "netzp_utils.hpp"
+#include "sysc/kernel/sc_module.h"
+#include "sysc/kernel/sc_module_name.h"
+#include "sysc/kernel/sc_wait_cthread.h"
 #include <iostream>
 #include <iomanip>
-#include <memory>
 #include <ostream>
 #include <stdexcept>
 
@@ -9,65 +13,24 @@ namespace netzp {
 
 constexpr char INDEX_OOB[] = "Memory index out of bounds";
 
-MemData::MemData()
-    : data_addr()
-    , data_wr()
-    , data_rd()
-    , w_en_s()
-    , r_en_s()
-    , w_en_m()
-    , r_en_m()
-{ /* nothing */ }
-
-MemData::MemData(const MemData& other)
-    : data_addr(other.data_addr)
-    , data_wr(other.data_wr)
-    , data_rd(other.data_rd)
-    , w_en_s(other.w_en_s)
-    , r_en_s(other.r_en_s)
-    , w_en_m(other.w_en_m)
-    , r_en_m(other.r_en_m)
-
-{ /* nothing */ }
-
-bool MemData::operator == (const MemData& other) const {
-    return (data_addr == other.data_addr) &&
-            (data_rd   == other.data_rd)   &&
-            (data_wr   == other.data_wr)   &&
-            (w_en_s    == other.w_en_s)    &&
-            (r_en_s    == other.r_en_s)    &&
-            (w_en_m    == other.w_en_m)    &&
-            (r_en_m    == other.r_en_m);
-}
-
-std::ostream& operator << (std::ostream& out, const MemData& signals) {
-    out << "data_addr = " << signals.data_addr << std::endl
-        << "data_rd = "   << signals.data_rd   << std::endl
-        << "data_wr = "   << signals.data_wr   << std::endl
-        << "w_en_s = "    << signals.w_en_s    << std::endl
-        << "r_en_s = "    << signals.r_en_s    << std::endl
-        << "w_en_m = "    << signals.w_en_m    << std::endl
-        << "r_en_m = "    << signals.r_en_m    << std::endl;
-    return out;
-}
-
 MemReply::MemReply()
     : master_id(0)
     , op_type(MemOperationType::NONE)
     , status(MemOperationStatus::NONE)
-    , data_rd(0) {}
+    , data(0) {}
 
 MemReply::MemReply(const MemReply& other)
     : master_id(other.master_id)
     , op_type(other.op_type)
     , status(other.status)
-    , data_rd(other.data_rd) {}
+    , data(other.data) {}
 
 bool MemReply::operator == (const MemReply& other) const {
     return master_id == other.master_id
         && op_type   == other.op_type
         && status    == other.status
-        && data_rd   == other.data_rd;
+        && data      == other.data
+        && addr      == other.addr;
 }
 
 MemRequest::MemRequest()
@@ -89,9 +52,9 @@ bool MemRequest::operator == (const MemRequest& other) const {
         && addr      == other.addr;
 }
 
-
 std::ostream& operator << (std::ostream& out, const MemReply& reply) {
-    out << PRINTVAL(reply.data_rd)   << std::endl
+    out << PRINTVAL(reply.data)      << std::endl
+        << PRINTVAL(reply.addr)      << std::endl
         << PRINTVAL(reply.master_id) << std::endl
         << PRINTVAL(static_cast<int>(reply.op_type)) << std::endl
         << PRINTVAL(static_cast<int>(reply.status));
@@ -208,6 +171,8 @@ void MemController::AtClk() {
 
 void MemController::AtRequest() {
     DEBUG_BEGIN_MODULE__;
+    static constexpr int DEBUG_MSG_LEVEL = 3;
+
     addr_next_    = 0;
     w_en_next_    = 0;
     r_en_next_    = 0;
@@ -216,7 +181,7 @@ void MemController::AtRequest() {
     if (access_granted[current_access_.read()]->read() == true) {
         request_ = requests_in[current_access_.read()]->read();
 
-        DEBUG_OUT(3) << request_ << std::endl;
+        DEBUG_OUT(DEBUG_MSG_LEVEL) << request_ << std::endl;
         switch (request_.op_type) {
             case netzp::MemOperationType::READ: {
                 addr_next_    = request_.addr;
@@ -241,13 +206,21 @@ void MemController::AtRequest() {
 
 void MemController::AtAck() {
     DEBUG_BEGIN_MODULE__;
+    static constexpr int DEBUG_MSG_LEVEL = 3;
+
     if (ack_in->read() == true) {
-        reply_next_.data_rd = data_rd->read();
+        if (request_.op_type == MemOperationType::READ) {
+            reply_next_.data = data_rd->read();
+        } else if (request_.op_type == MemOperationType::WRITE) {
+            reply_next_.data = request_.data_wr;
+        }
+
+        reply_next_.addr = request_.addr;
         reply_next_.master_id = request_.master_id;
         reply_next_.op_type = request_.op_type;
         reply_next_.status = MemOperationStatus::OK;
 
-        DEBUG_OUT(3) << reply_next_ << std::endl;
+        DEBUG_OUT(DEBUG_MSG_LEVEL) << reply_next_ << std::endl;
 
         ack_out_next_ = true;
     } else if (ack_in.read() == false) {
@@ -270,8 +243,7 @@ void MemController::AtCounter() {
     }
 }
 
-MemController::MemController(sc_core::sc_module_name const&)
-{
+MemController::MemController(sc_core::sc_module_name const&) {
     SC_METHOD(AtClk);
     sensitive << clk.pos();
 
@@ -285,6 +257,80 @@ MemController::MemController(sc_core::sc_module_name const&)
     SC_METHOD(AtCounter);
     for (const auto& request : access_request) sensitive << request;
     sensitive << current_access_;
+}
+
+void MemIO::AtClk() {
+    if (rst.read()) {
+        request->write(MemRequest());
+        requests_fifo_.clear();
+        replies_fifo_.clear();
+    }
+}
+
+void MemIO::MainProcess() {
+    static constexpr int DEBUG_MSG_LEVEL = 3;
+
+    // main loop
+    while (true) {
+        new_reply_ = false;
+
+        sc_core::wait(); // wait for clock
+        if (new_request_) {
+            DEBUG_OUT(DEBUG_MSG_LEVEL) << "Request!" << std::endl;
+            for (const auto& request : requests_from_host->read().data) {
+                requests_fifo_.push_back(request);
+            }
+
+            new_request_ = false;
+            access_request->write(true);
+        }
+
+        while (access_request.read() == true && access_granted.read() == true && !requests_fifo_.empty()) {
+            sc_core::wait();
+            DEBUG_OUT(DEBUG_MSG_LEVEL) << "Sending! " << requests_fifo_.size() << std::endl;
+            request->write(requests_fifo_.front());
+
+            if (new_reply_) {
+                DEBUG_OUT(DEBUG_MSG_LEVEL) << "Reply" << std::endl;
+                DEBUG_OUT(DEBUG_MSG_LEVEL) << reply->read() << std::endl;
+                replies_fifo_.push_back(reply->read());
+                requests_fifo_.pop_front();
+
+                new_reply_ = false;
+            }
+
+            if (requests_fifo_.empty()) {
+                DataVector<MemReply> ret;
+                for (const auto& el : replies_fifo_) {
+                    ret.data.push_back(el);
+                }
+
+                ret.data.shrink_to_fit();
+                replies_to_host->write(ret);
+                replies_fifo_.clear();
+            }
+        }
+
+    }
+}
+
+void MemIO::AtRequestsFromHost() {
+    new_request_ = true;
+}
+
+void MemIO::AtReply() {
+    new_reply_ = true;
+}
+
+MemIO::MemIO(sc_core::sc_module_name const&) {
+    SC_THREAD(MainProcess);
+    sensitive << clk.pos();
+
+    SC_METHOD(AtRequestsFromHost);
+    sensitive << requests_from_host;
+
+    SC_METHOD(AtReply);
+    sensitive << reply;
 }
 
 } // namespace netzp

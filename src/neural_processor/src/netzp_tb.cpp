@@ -1,9 +1,12 @@
-#include <iterator>
+#include <cstddef>
+#include <iomanip>
 #include <memory>
 #include <systemc>
 #include <iostream>
 #include "netzp_config.hpp"
+#include "netzp_io.hpp"
 #include "netzp_mem.hpp"
+#include "netzp_utils.hpp"
 
 void RunCycles(sc_core::sc_signal<bool>& clk, int cycles, sc_core::sc_time_unit tu) {
     using namespace sc_core;
@@ -60,9 +63,94 @@ public:
     }
 };
 
+std::vector<netzp::MemRequest> BytesToRequests(const std::vector<uchar>& bytes, offset_t offset) {
+    std::vector<netzp::MemRequest> result;
+
+    for (const auto byte : bytes) {
+        result.emplace_back();
+        result.back().addr = offset;
+        result.back().data_wr = byte;
+        result.back().master_id = 1;
+        result.back().op_type = netzp::MemOperationType::WRITE;
+        offset++;
+    }
+
+    result.shrink_to_fit();
+    return result;
+}
+
+std::vector<netzp::MemRequest> ReadRequests(offset_t base_addr, size_t size) {
+    std::vector<netzp::MemRequest> result;
+
+    for (offset_t addr = base_addr; addr < (base_addr + size); addr++) {
+        result.emplace_back();
+        result.back().addr = addr;
+        result.back().data_wr = 0;
+        result.back().master_id = 1;
+        result.back().op_type = netzp::MemOperationType::READ;
+    }
+
+    result.shrink_to_fit();
+    return result;
+}
+
 int sc_main(int argc, char **argv) {
     using namespace sc_core;
     using namespace sc_dt;
+
+    netzp::NeuronData neurons[4];
+    neurons[0] = {
+        .layer   = 0,
+        .neuron  = 0,
+        .weights_count = 3,
+        .weights = {
+            3.14, 2.34, 1.23
+        }
+    };
+
+    neurons[1] = {
+        .layer   = 0,
+        .neuron  = 1,
+        .weights_count = 3,
+        .weights = {
+            3.24, 1.34, 3.23
+        }
+    };
+
+    neurons[2] = {
+        .layer   = 1,
+        .neuron  = 0,
+        .weights_count = 3,
+        .weights = {
+            3.14, 2.4, 5.23
+        }
+    };
+
+    neurons[3] = {
+        .layer   = 1,
+        .neuron  = 1,
+        .weights_count = 2,
+        .weights = {
+            33.14, 32.34, 10.23
+        }
+    };
+
+    netzp::NetzwerkData netz = {
+        .neurons_count = 4,
+        .neurons = {
+            neurons[0],
+            neurons[1],
+            neurons[2],
+            neurons[3]
+        }
+    };
+
+    sc_signal<netzp::NetzwerkData> netz_data;
+
+    sc_signal<bool> data_inputs[CONFIG_INPUT_PICTURE_HEIGHT * CONFIG_INPUT_PICTURE_WIDTH];
+    for (config_int_t i = 0; i < CONFIG_INPUT_PICTURE_HEIGHT * CONFIG_INPUT_PICTURE_HEIGHT; i++) {
+        data_inputs[i] = i % 2;
+    }
 
     sc_signal<netzp::mem_data_t> data_rd(0);
     sc_signal<netzp::mem_data_t> data_wr(0);
@@ -82,12 +170,18 @@ int sc_main(int argc, char **argv) {
     sc_signal<bool> rst(0);
     sc_signal<bool> clk(0);
 
-    netzp::Mem mem("Memory", 64);
+    DataVector<netzp::MemRequest>            requests;
+    sc_signal<DataVector<netzp::MemRequest>> requests_signal;
+    sc_signal<DataVector<netzp::MemReply>>   replies_signal;
+
+    netzp::Mem mem("Memory", netzp::KBYTE);
     netzp::MemController bus("Bus");
 
     std::vector<std::unique_ptr<Tester>> masters;
     masters.emplace_back(new Tester("Master1"));
-    masters.emplace_back(new Tester("Master2"));
+
+    netzp::InOutController *io = new netzp::InOutController("iocon");
+    netzp::MemIO *memio = new netzp::MemIO("memio");
 
     mem.clk(clk);
     mem.rst(rst);
@@ -111,8 +205,30 @@ int sc_main(int argc, char **argv) {
     bus.r_en(r_en);
     bus.w_en(w_en);
 
-    for (int i = 0; i < port_count; i++) {
-        masters[i]->clk(clk);
+    masters[0]->clk(clk);
+    masters[0]->reply_in(reply[0]);
+    masters[0]->request_out(request[0]);
+    masters[0]->access_granted(access_granted[0]);
+    masters[0]->access_request(access_request[0]);
+
+    io->clk(clk);
+    io->rst(rst);
+    io->replies(replies_signal);
+    io->requests(requests_signal);
+    io->netz_data(netz_data);
+
+    memio->clk(clk);
+    memio->rst(rst);
+    memio->access_granted(access_granted[1]);
+    memio->access_request(access_request[1]);
+    memio->reply(reply[1]);
+    memio->request(request[1]);
+    memio->requests_from_host(requests_signal);
+    memio->replies_to_host(replies_signal);
+
+
+    for (config_int_t i = 0; i < CONFIG_INPUT_PICTURE_WIDTH * CONFIG_INPUT_PICTURE_HEIGHT; i++) {
+        io->data_inputs[i](data_inputs[i]);
     }
 
     for (int i = 0; i < port_count; i++) {
@@ -120,11 +236,6 @@ int sc_main(int argc, char **argv) {
         bus.access_request[i](access_request[i]);
         bus.requests_in[i](request[i]);
         bus.replies_out[i](reply[i]);
-
-        masters[i]->reply_in(reply[i]);
-        masters[i]->request_out(request[i]);
-        masters[i]->access_granted(access_granted[i]);
-        masters[i]->access_request(access_request[i]);
     }
 
     DEBUG_OUT(DEBUG_LEVEL_MSG) << "begin" << std::endl;
@@ -137,80 +248,27 @@ int sc_main(int argc, char **argv) {
 
     DEBUG_OUT(DEBUG_LEVEL_MSG) << "try write 1" << std::endl;
 
-    masters[0]->request_next.master_id = 1;
-    masters[0]->request_next.addr = 0x00;
-    masters[0]->request_next.data_wr = 0x32;
-    masters[0]->request_next.op_type = netzp::MemOperationType::WRITE;
-    masters[0]->access_request_next = true;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[0]->access_request_next = false;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[1]->request_next.master_id = 2;
-    masters[1]->request_next.addr = 0x01;
-    masters[1]->request_next.data_wr = 0x45;
-    masters[1]->request_next.op_type = netzp::MemOperationType::WRITE;
-    masters[1]->access_request_next = true;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[1]->access_request_next = false;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[0]->request_next.master_id = 1;
-    masters[0]->request_next.addr = 0x3F;
-    masters[0]->request_next.data_wr = 0xFF;
-    masters[0]->request_next.op_type = netzp::MemOperationType::WRITE;
-    masters[0]->access_request_next = true;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[0]->access_request_next = false;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[1]->request_next.master_id = 2;
-    masters[1]->request_next.addr = 0x3E;
-    masters[1]->request_next.data_wr = 0xFF;
-    masters[1]->request_next.op_type = netzp::MemOperationType::WRITE;
-    masters[1]->access_request_next = true;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[1]->access_request_next = false;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    DEBUG_OUT(DEBUG_LEVEL_MSG) << "Read begin" << std::endl;
-
-    masters[0]->request_next.master_id = 1;
-    masters[0]->request_next.addr = 0x3F;
-    masters[0]->request_next.data_wr = 0;
-    masters[0]->request_next.op_type = netzp::MemOperationType::READ;
-    masters[0]->access_request_next = true;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    DEBUG_OUT(DEBUG_LEVEL_MSG) << "Read: " << masters[0]->reply.data_rd << std::endl;
-
-    masters[0]->access_request_next = false;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[1]->request_next.master_id = 2;
-    masters[1]->request_next.addr = 0x01;
-    masters[1]->request_next.data_wr = 0;
-    masters[1]->request_next.op_type = netzp::MemOperationType::READ;
-    masters[1]->access_request_next = true;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    masters[1]->access_request_next = false;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    DEBUG_OUT(DEBUG_LEVEL_MSG) << "Read: " << masters[1]->reply.data_rd << std::endl;
+    netz_data = netz;
+    // requests.data = BytesToRequests({ 0x21, 0x22, 0x23, 0x24, 0x25 }, 0x02);
+    // requests_signal.write(requests);
+    RunCycles(clk, 2000, sc_core::SC_NS);
 
     DEBUG_OUT(DEBUG_LEVEL_MSG) << "Mem dump:" << std::endl;
     mem.Dump(std::cout);
 
-    rst = 1;
-    RunCycles(clk, 5, SC_NS);
+    requests.data = ReadRequests(0x02, 5);
+    requests_signal.write(requests);
+    RunCycles(clk, 300, sc_core::SC_NS);
 
-    std::cout << "Mem dump:" << std::endl;
-    mem.Dump(std::cout);
+    DEBUG_OUT(1) << "READ:" << std::endl;
+    for (const auto byte : replies_signal.read().data) {
+        std::cout << std::hex << std::setw(2) << std::setfill('0') << byte.data << " ";
+    }
+    std::cout << std::dec << std::endl;
+
+
+    // delete io;
+    delete memio;
 
     return 0;
 }

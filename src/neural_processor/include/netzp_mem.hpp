@@ -2,6 +2,8 @@
 #define _NETZP_MEM_H_
 
 #include "netzp_config.hpp"
+#include "netzp_utils.hpp"
+#include <deque>
 #include <systemc>
 #include <vector>
 
@@ -15,24 +17,6 @@ constexpr unsigned int GBYTE = MBYTE * 1024;
 using mem_data_t = sc_dt::sc_uint<8>;
 using mem_addr_t = sc_dt::sc_uint<16>;
 using mem_master_id_t = sc_dt::sc_uint<8>;
-
-struct MemData {
-    mem_addr_t            data_addr;
-    mem_data_t            data_wr;
-    bool                  w_en_s;
-    bool                  r_en_s;
-    bool                  w_en_m;
-    bool                  r_en_m;
-    mem_data_t            data_rd;
-
-    MemData();
-
-    MemData(const MemData& other);
-
-    bool operator == (const MemData& other) const;
-};
-
-std::ostream& operator << (std::ostream& out, const MemData& signals);
 
 enum class MemOperationType {
     WRITE,
@@ -65,7 +49,8 @@ struct MemReply {
     mem_master_id_t    master_id;
     MemOperationType   op_type;
     MemOperationStatus status;
-    mem_data_t         data_rd;
+    mem_data_t         data;
+    mem_addr_t         addr;
 
     MemReply();
 
@@ -116,11 +101,11 @@ private:
     bool       r_en_next_;
     bool       ack_out_next_;
 
-    bool access_granted_next_[MAX_CONNECTIONS];
-    MemRequest        request_;
-    MemReply          reply_next_;
+    bool       access_granted_next_[MAX_CONNECTIONS];
+    MemRequest request_;
+    MemReply   reply_next_;
 
-    sc_dt::sc_uint<8> current_access_next_;
+    sc_dt::sc_uint<8>                     current_access_next_;
     sc_core::sc_signal<sc_dt::sc_uint<8>> current_access_;
 
 public:
@@ -138,10 +123,10 @@ public:
     sc_core::sc_in<mem_data_t>     data_rd;
 
     // Masters side
-    sc_core::sc_in<bool>                                   access_request[MAX_CONNECTIONS];
-    sc_core::sc_out<bool>                                  access_granted[MAX_CONNECTIONS];
-    sc_core::sc_port<sc_core::sc_signal_in_if<MemRequest>> requests_in[MAX_CONNECTIONS];
-    sc_core::sc_port<sc_core::sc_signal_out_if<MemReply>>  replies_out[MAX_CONNECTIONS];
+    sc_core::sc_in<bool>           access_request[MAX_CONNECTIONS];
+    sc_core::sc_out<bool>          access_granted[MAX_CONNECTIONS];
+    sc_signal_port_in<MemRequest>  requests_in[MAX_CONNECTIONS];
+    sc_signal_port_out<MemReply>   replies_out[MAX_CONNECTIONS];
 
 public:
     explicit MemController(sc_core::sc_module_name const&);
@@ -151,6 +136,45 @@ public:
     void AtAccessRequest();
     void AtAck();
     void AtCounter();
+};
+
+class MemIO : public sc_core::sc_module {
+private:
+    std::deque<MemRequest> requests_fifo_;
+    std::deque<MemReply> replies_fifo_;
+
+    size_t requests_size_;
+
+    sc_core::sc_signal<bool> reply_ready_;
+    bool                     reply_ready_next_;
+
+public:
+    // System side
+    sc_core::sc_in<bool>   clk;
+    sc_core::sc_in<bool>   rst;
+
+    // Memory side
+    sc_signal_port_out<MemRequest> request;
+    sc_signal_port_in<MemReply>    reply;
+    sc_core::sc_out<bool>          access_request;
+    sc_core::sc_in<bool>           access_granted;
+
+    // User side
+    sc_signal_port_in<DataVector<MemRequest>> requests_from_host;
+    sc_signal_port_out<DataVector<MemReply>>  replies_to_host;
+
+    bool new_request_ = false;
+    bool new_reply_   = false;
+
+private:
+
+public:
+    void AtRequestsFromHost();
+    void AtReply();
+    void AtClk();
+    void MainProcess();
+
+    MemIO(sc_core::sc_module_name const&);
 };
 
 } // namespace netzp
