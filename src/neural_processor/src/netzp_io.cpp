@@ -2,12 +2,38 @@
 #include "netzp_config.hpp"
 #include "netzp_mem.hpp"
 #include "netzp_utils.hpp"
-#include "sysc/kernel/sc_module.h"
-#include "sysc/kernel/sc_module_name.h"
-#include <linux/limits.h>
-#include <vector>
+#include <stdexcept>
+#include <system_error>
 
 namespace netzp {
+
+constexpr char INVALID_BYTES[] = "Amount of bytes is not valid for this type";
+
+NeuronData NeuronData::Deserialize(const uchar *bytes) {
+    const offset_t layer_off         = 0;
+    const offset_t neuron_off        = 1;
+    const offset_t weights_count_off = 2;
+    const offset_t weights_off       = 3;
+
+    NeuronData data;
+    data.layer         = bytes[layer_off];
+    data.neuron        = bytes[neuron_off];
+    data.weights_count = bytes[weights_count_off];
+
+    const size_t neuron_size = data.SizeInBytes();
+
+    for (offset_t current_offset = weights_off; current_offset < neuron_size;
+                                                current_offset += sizeof(fp_t)) {
+        const fp_t *weight = reinterpret_cast<const fp_t *>(bytes + current_offset);
+        data.weights.push_back(*weight);
+    }
+
+    return data;
+}
+
+size_t NeuronData::SizeInBytes() const {
+    return sizeof(count_type) * 3 + sizeof(fp_t) * weights_count;
+}
 
 bool NeuronData::operator==(const NeuronData& other) const {
     return layer == other.layer                 &&
@@ -54,6 +80,26 @@ std::ostream& operator<<(std::ostream& out, const NeuronData& neuron_data) {
 bool NetzwerkData::operator==(const NetzwerkData& other) const {
     return neurons_count == other.neurons_count &&
            neurons == other.neurons;
+}
+
+NetzwerkData NetzwerkData::Deserialize(const uchar *bytes) {
+    const offset_t neurons_count_off = 0;
+    const offset_t neurons_off       = 1;
+    NetzwerkData data;
+
+    data.neurons_count = bytes[neurons_count_off];
+
+    offset_t current_offset = neurons_off;
+    for (uchar i = 0; i < data.neurons_count; i++){
+        NeuronData n = NeuronData::Deserialize(bytes + current_offset);
+
+        current_offset += n.SizeInBytes();
+        data.neurons.emplace_back(std::move(n));
+    }
+
+    DEBUG_OUT(1) << data << std::endl;
+
+    return data;
 }
 
 const std::vector<uchar> NetzwerkData::Serialize() const {

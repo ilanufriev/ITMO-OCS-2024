@@ -34,6 +34,8 @@ constexpr config_int_t CONFIG_MEMORY_CONTROLLER_MAX_CONNECTIONS = 2;
 constexpr config_int_t CONFIG_INPUT_PICTURE_WIDTH = 7;
 constexpr config_int_t CONFIG_INPUT_PICTURE_HEIGHT = 7;
 constexpr config_int_t CONFIG_INPUT_DATA_OFFSET = 0x00;
+constexpr config_int_t CONFIG_COMP_CORE_COUNT = 3;
+constexpr config_int_t CONFIG_CDU_MAX_NEURONS_COUNT = 255;
 
 // USINGS
 template <typename T>
@@ -42,11 +44,12 @@ using sc_signal_port_in = sc_core::sc_port<sc_core::sc_signal_in_if<T>>;
 template <typename T>
 using sc_signal_port_out = sc_core::sc_port<sc_core::sc_signal_out_if<T>>;
 
-using sc_uint8  = sc_dt::sc_uint<8>;
-using sc_uint16 = sc_dt::sc_uint<16>;
-using sc_uint32 = sc_dt::sc_uint<32>;
-using sc_uint64 = sc_dt::sc_uint<64>;
-using offset_t  = unsigned int;
-using uchar     = unsigned char;
+using sc_uint8    = sc_dt::sc_uint<8>;
+using sc_uint16   = sc_dt::sc_uint<16>;
+using sc_uint32   = sc_dt::sc_uint<32>;
+using sc_uint64   = sc_dt::sc_uint<64>;
+using offset_t    = unsigned int;
+using uchar       = unsigned char;
+using fp_t        = float;
 
 #endif

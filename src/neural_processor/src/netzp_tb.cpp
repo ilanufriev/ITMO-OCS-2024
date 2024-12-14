@@ -1,12 +1,16 @@
+#include <cassert>
 #include <cstddef>
 #include <iomanip>
 #include <memory>
 #include <systemc>
 #include <iostream>
+#include "netzp_comp_core.hpp"
 #include "netzp_config.hpp"
 #include "netzp_io.hpp"
 #include "netzp_mem.hpp"
 #include "netzp_utils.hpp"
+#include "sysc/kernel/sc_simcontext.h"
+#include "sysc/kernel/sc_time.h"
 
 void RunCycles(sc_core::sc_signal<bool>& clk, int cycles, sc_core::sc_time_unit tu) {
     using namespace sc_core;
@@ -131,7 +135,7 @@ int sc_main(int argc, char **argv) {
         .neuron  = 1,
         .weights_count = 2,
         .weights = {
-            33.14, 32.34, 10.23
+            33.14, 32.34
         }
     };
 
@@ -144,6 +148,12 @@ int sc_main(int argc, char **argv) {
             neurons[3]
         }
     };
+
+    auto serialized_neuron = neurons[0].Serialize();
+    assert(neurons[0] == netzp::NeuronData::Deserialize(serialized_neuron.data()));
+
+    auto serialized_netz = netz.Serialize();
+    assert(netz == netzp::NetzwerkData::Deserialize(serialized_netz.data()));
 
     sc_signal<netzp::NetzwerkData> netz_data;
 
@@ -182,6 +192,20 @@ int sc_main(int argc, char **argv) {
 
     netzp::InOutController *io = new netzp::InOutController("iocon");
     netzp::MemIO *memio = new netzp::MemIO("memio");
+
+    netzp::AccumulationCore core("AccCore");
+    netzp::ComputationData compdata;
+    compdata.data = netz.neurons.at(0);
+    compdata.inputs = { 1, 2, 3 };
+    compdata.output = 0;
+
+    sc_signal<fp_t> product;
+    sc_signal<netzp::ComputationData> data_signal;
+
+    core.clk(clk);
+    core.rst(rst);
+    core.data(data_signal);
+    core.result(product);
 
     mem.clk(clk);
     mem.rst(rst);
@@ -266,6 +290,10 @@ int sc_main(int argc, char **argv) {
     }
     std::cout << std::dec << std::endl;
 
+    data_signal.write(compdata);
+    RunCycles(clk, 10, SC_NS);
+
+    DEBUG_OUT(1) << PRINTVAL(product.read()) << std::endl;
 
     // delete io;
     delete memio;

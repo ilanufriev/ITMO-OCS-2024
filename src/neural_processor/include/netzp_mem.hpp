@@ -61,6 +61,8 @@ struct MemReply {
 
 std::ostream& operator << (std::ostream& out, const MemReply& reply);
 
+std::vector<uchar> RepliesToByes(const std::vector<MemReply>& replies);
+
 class Mem : public sc_core::sc_module {
 private:
     static constexpr unsigned int MEMSIZE = 64 * KBYTE;

@@ -69,6 +69,31 @@ std::ostream& operator << (std::ostream& out, const MemRequest& req) {
     return out;
 }
 
+std::vector<MemRequest> ReadMemorySpanRequests(mem_addr_t base_addr, size_t size,
+                                               mem_master_id_t master_id) {
+    std::vector<MemRequest> result;
+    for (mem_addr_t addr = base_addr; addr < (base_addr + size); addr++) {
+        auto& req     = result.emplace_back();
+
+        req.addr      = addr;
+        req.data_wr   = 0;
+        req.master_id = master_id;
+        req.op_type   = MemOperationType::READ;
+    }
+
+    return result;
+}
+
+
+std::vector<uchar> RepliesToByes(const std::vector<MemReply>& replies) {
+    std::vector<uchar> bytes;
+    for (const auto& reply : replies) {
+        bytes.push_back(static_cast<uchar>(reply.data.to_uint()));
+    }
+
+    return bytes;
+}
+
 void Mem::AtClk() {
     if (rst.read()) {
         for (int i = 0; i < mem_.size(); i++) {
