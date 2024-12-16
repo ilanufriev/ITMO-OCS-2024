@@ -59,6 +59,12 @@ void CentralDispatchUnit::OutputAdd(fp_t value, size_t index) {
     outputs_ready_[index] = true;
 }
 
+void CentralDispatchUnit::AtStart() {
+    if (start->read() == false) {
+        finished_ = false;
+    }
+}
+
 void CentralDispatchUnit::MainProcess() {
     const offset_t neurons_off                   = InOutController::NETZ_DATA_OFFSET + 1;
     const size_t   neuron_static_size            = sizeof(NeuronData::count_type) * 3;
@@ -68,7 +74,7 @@ void CentralDispatchUnit::MainProcess() {
     const offset_t neuron_data_weights_off       = 3;
 
     while (true) {
-        uchar neuron_count = 0;
+        has_mem_reply_ = false;
 
         // Means that the cores have not yet been assigned with any task
         std::array<bool, CORE_COUNT> core_cold;
@@ -77,17 +83,14 @@ void CentralDispatchUnit::MainProcess() {
             core_cold[i] = true;
         }
 
-        has_mem_reply_ = false;
-
         sc_core::wait();
         if (rst.read()) {
             continue;
         }
 
-        if (!(start.read() == true)) {
+        if (!(start.read() == true) || finished_ == true) {
             continue;
         }
-
 
         // fetch inputs
         DataVector<MemRequest> input_req;
@@ -112,6 +115,7 @@ void CentralDispatchUnit::MainProcess() {
 
         // fetch_neuron_count
         DEBUG_OUT(1) << "fetch" << std::endl;
+        uchar neuron_count = 0;
 
         DataVector<MemRequest> netz_req;
         netz_req.data = ReadMemorySpanRequests(InOutController::NETZ_DATA_OFFSET,
@@ -135,9 +139,9 @@ void CentralDispatchUnit::MainProcess() {
 
         // And now we start fetching neurons one by one
         NeuronData ndata;
-        ndata.neuron = 0;
-        ndata.layer  = 0;
-        outputs_size_ = 0;
+        ndata.neuron        = 0;
+        ndata.layer         = 0;
+        outputs_size_       = 0;
         outputs_ready_size_ = 0;
 
         offset_t current_offset = neurons_off;
@@ -287,10 +291,7 @@ void CentralDispatchUnit::MainProcess() {
         DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_[1]) << std::endl;
         DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_[2]) << std::endl;
 
-        // outputs[0]->write(outputs_[0]);
-        // outputs[1]->write(outputs_[1]);
-        // outputs[2]->write(outputs_[2]);
-        break;
+        finished_ = true;
     }
 }
 

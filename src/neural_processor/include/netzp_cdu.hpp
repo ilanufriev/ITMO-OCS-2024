@@ -37,6 +37,8 @@ private:
     size_t outputs_size_;
     size_t outputs_ready_size_;
 
+    bool finished_ = false;
+
 public:
     sc_core::sc_in<bool> clk;
     sc_core::sc_in<bool> rst;
@@ -57,6 +59,7 @@ public:
     void MainProcess();
     void AtCoreReady();
     void AtMemReply();
+    void AtStart();
 };
 
 } // namespace netzp
