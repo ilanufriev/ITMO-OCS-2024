@@ -1,15 +1,15 @@
-#include <cassert>
 #include <cstddef>
+#include <fstream>
 #include <iomanip>
 #include <memory>
 #include <systemc>
 #include <iostream>
+#include "netzp_cdu.hpp"
 #include "netzp_comp_core.hpp"
 #include "netzp_config.hpp"
 #include "netzp_io.hpp"
 #include "netzp_mem.hpp"
 #include "netzp_utils.hpp"
-#include "sysc/kernel/sc_simcontext.h"
 #include "sysc/kernel/sc_time.h"
 
 void RunCycles(sc_core::sc_signal<bool>& clk, int cycles, sc_core::sc_time_unit tu) {
@@ -24,81 +24,231 @@ void RunCycles(sc_core::sc_signal<bool>& clk, int cycles, sc_core::sc_time_unit 
     clk = 0;
 }
 
-class Tester : public sc_core::sc_module {
-public:
-    netzp::MemRequest request_next;
-    netzp::MemReply   reply;
+enum {
+    ARGV_IN_FILENAME = 1,
+    ARGV_NETWORK_FILENAME = 2,
+};
 
-    bool access_request_next = false;
+netzp::NetzwerkData ParseNetwork(std::istream& in) {
+    std::string line;
+    std::vector<std::vector<std::vector<double>>> weights;
 
-    sc_core::sc_in<bool> clk;
+    int input_count = 0;
+    int layer = 0;
+    int neuron = 0;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue; // Skip empty lines
 
-    sc_core::sc_port<sc_core::sc_signal_out_if<netzp::MemRequest>, 0> request_out;
-    sc_core::sc_out<bool>                                             access_request;
+        if (line[0] == '>') {
+            std::string input_count_str = line.substr(1); // remove '>'
+            input_count = std::stoi(input_count_str);
 
-    sc_core::sc_port<sc_core::sc_signal_in_if<netzp::MemReply>, 0>    reply_in;
-    sc_core::sc_in<bool>                                              access_granted;
+        } else if (line[0] == '@') {
+            // Parse the indices
+            std::string indices = line.substr(1); // Remove '@'
+            size_t delimiterPos = indices.find('/');
+            if (delimiterPos == std::string::npos) {
+                throw std::runtime_error("Invalid index format.");
+            }
 
-    void AtClk() {
-        if (clk->read()) {
-            access_request.write(access_request_next);
+            layer  = std::stoi(indices.substr(0, delimiterPos));
+            neuron = std::stoi(indices.substr(delimiterPos + 1));
 
-            if (access_request->read() == true && access_granted->read() == true)
-                request_out->write(request_next);
+            // Ensure the array is large enough
+            if (layer >= weights.size()) {
+                weights.resize(layer + 1);
+            }
+
+            if (neuron >= weights[layer].size()) {
+                weights[layer].resize(neuron + 1);
+            }
+
+        } else if (line[0] == '#') {
+            double value = std::stod(line.substr(1)); // Remove '#'
+            weights[layer][neuron].push_back(value);
+
         }
     }
 
-    void Reset() {
-        DEBUG_BEGIN_MODULE__;
-        access_request_next = 0;
+    netzp::NetzwerkData netz_data;
+
+    netz_data.neurons_count = 0;
+    for (const auto& l : weights) {
+        netz_data.neurons_count += l.size();
     }
 
-    void AtReply() {
-        DEBUG_BEGIN_MODULE__;
-        reply = reply_in->read();
+    for (layer = 0; layer < weights.size(); layer++) {
+        for (neuron = 0; neuron < weights.at(layer).size(); neuron++) {
+            auto& ndata = netz_data.neurons.emplace_back();
+            ndata.layer = layer;
+            ndata.neuron = neuron;
+
+            for (int weight = 0; weight < weights.at(layer).at(neuron).size(); weight++) {
+                ndata.weights.push_back(weights.at(layer).at(neuron).at(weight));
+            }
+
+            ndata.weights_count = ndata.weights.size();
+        }
     }
 
-    explicit Tester(sc_core::sc_module_name const &name) {
-        SC_METHOD(AtClk);
-        sensitive << clk.pos();
-
-        SC_METHOD(AtReply);
-        sensitive << reply_in;
-    }
-};
-
-std::vector<netzp::MemRequest> BytesToRequests(const std::vector<uchar>& bytes, offset_t offset) {
-    std::vector<netzp::MemRequest> result;
-
-    for (const auto byte : bytes) {
-        result.emplace_back();
-        result.back().addr = offset;
-        result.back().data_wr = byte;
-        result.back().master_id = 1;
-        result.back().op_type = netzp::MemOperationType::WRITE;
-        offset++;
-    }
-
-    result.shrink_to_fit();
-    return result;
-}
-
-std::vector<netzp::MemRequest> ReadRequests(offset_t base_addr, size_t size) {
-    std::vector<netzp::MemRequest> result;
-
-    for (offset_t addr = base_addr; addr < (base_addr + size); addr++) {
-        result.emplace_back();
-        result.back().addr = addr;
-        result.back().data_wr = 0;
-        result.back().master_id = 1;
-        result.back().op_type = netzp::MemOperationType::READ;
-    }
-
-    result.shrink_to_fit();
-    return result;
+    return netz_data;
 }
 
 int sc_main(int argc, char **argv) {
+    using namespace sc_core;
+    using namespace sc_dt;
+
+    const char *input_filename = argv[ARGV_IN_FILENAME];
+    const char *network_filename = argv[ARGV_NETWORK_FILENAME];
+
+    std::ifstream inputs_file(input_filename);
+    if (!inputs_file) {
+        std::cout << "No such file: " << input_filename << std::endl;
+        return 1;
+    }
+
+
+
+    std::ifstream network_file(network_filename);
+    if (!network_file) {
+        std::cout << "No such file: " << network_filename << std::endl;
+        return 1;
+    }
+
+    netzp::NetzwerkData nd = ParseNetwork(network_file);
+    DEBUG_OUT(1) << nd << std::endl;
+
+    sc_signal<netzp::mem_data_t> data_rd(0);
+    sc_signal<netzp::mem_data_t> data_wr(0);
+    sc_signal<netzp::mem_addr_t> addr(0);
+    sc_signal<bool>              w_en(0);
+    sc_signal<bool>              r_en(0);
+    sc_signal<bool>              ack_mem_to_con(0);
+    sc_signal<bool>              ack_con_to_mem(0);
+
+    const size_t port_count = CONFIG_MEMORY_CONTROLLER_MAX_CONNECTIONS;
+
+    sc_vector<sc_signal<bool>>              access_granted("acc_granted", port_count);
+    sc_vector<sc_signal<bool>>              access_request("acc_request", port_count);
+    sc_vector<sc_signal<netzp::MemReply>>   reply("reply", port_count);
+    sc_vector<sc_signal<netzp::MemRequest>> request("request", port_count);
+
+    sc_vector<sc_signal<DataVector<netzp::MemRequest>>> requests_from_host("req_from_host", port_count);
+    sc_vector<sc_signal<DataVector<netzp::MemReply>>> replies_to_host("rep_to_host", port_count);
+
+    sc_signal<bool> rst(0);
+    sc_signal<bool> clk(0);
+
+    sc_signal<netzp::NetzwerkData> netz_data;
+    sc_vector<sc_signal<bool>> input_signals("inputs", netzp::InOutController::INPUT_COUNT);
+    for (int i = 0; i < input_signals.size() && !inputs_file.eof(); i++) {
+        char c;
+        inputs_file >> c;
+        input_signals[i].write((c == '1' ? true : false));
+    }
+
+    netzp::CentralDispatchUnit cdu("cdu");
+
+    sc_signal<bool> start;
+
+    start.write(0);
+
+    cdu.clk(clk);
+    cdu.rst(rst);
+    cdu.mem_replies(replies_to_host[1]);
+    cdu.mem_requests(requests_from_host[1]);
+    cdu.start(start);
+
+    netzp::Mem memory("memory", 2 * netzp::KBYTE);
+
+    memory.clk(clk);
+    memory.rst(rst);
+
+    memory.ack_in(ack_con_to_mem);
+    memory.ack_out(ack_mem_to_con);
+    memory.data_rd(data_rd);
+    memory.data_wr(data_wr);
+    memory.addr(addr);
+    memory.w_en(w_en);
+    memory.r_en(r_en);
+
+    netzp::MemController bus("Membus");
+
+    bus.clk(clk);
+    bus.rst(rst);
+
+    for (int i = 0; i < port_count; i++) {
+        bus.access_granted[i](access_granted[i]);
+        bus.access_request[i](access_request[i]);
+        bus.requests_in[i](request[i]);
+        bus.replies_out[i](reply[i]);
+    }
+
+    bus.ack_in(ack_mem_to_con);
+    bus.ack_out(ack_con_to_mem);
+    bus.data_rd(data_rd);
+    bus.data_wr(data_wr);
+    bus.addr(addr);
+    bus.w_en(w_en);
+    bus.r_en(r_en);
+
+    netzp::MemIO iocon_memio("iocon_memio");
+
+    iocon_memio.clk(clk);
+    iocon_memio.rst(rst);
+
+    iocon_memio.reply(reply[0]);
+    iocon_memio.request(request[0]);
+    iocon_memio.requests_from_host(requests_from_host[0]);
+    iocon_memio.replies_to_host(replies_to_host[0]);
+    iocon_memio.access_request(access_request[0]);
+    iocon_memio.access_granted(access_granted[0]);
+
+    netzp::MemIO cdu_memio("cdu_memio");
+
+    cdu_memio.clk(clk);
+    cdu_memio.rst(rst);
+
+    cdu_memio.reply(reply[1]);
+    cdu_memio.request(request[1]);
+    cdu_memio.requests_from_host(requests_from_host[1]);
+    cdu_memio.replies_to_host(replies_to_host[1]);
+    cdu_memio.access_request(access_request[1]);
+    cdu_memio.access_granted(access_granted[1]);
+
+    netzp::InOutController iocon("iocon");
+
+    iocon.clk(clk);
+    iocon.rst(rst);
+
+    iocon.netz_data(netz_data);
+    for (int i = 0; i < netzp::InOutController::INPUT_COUNT; i++) {
+        iocon.data_inputs[i](input_signals[i]);
+    }
+
+    iocon.requests(requests_from_host[0]);
+    iocon.replies(replies_to_host[0]);
+
+    rst = 1;
+    clk = 0;
+    RunCycles(clk, 5, SC_NS);
+
+    rst = 0;
+    clk = 0;
+    RunCycles(clk, 5, SC_NS);
+
+    netz_data.write(nd);
+    RunCycles(clk, 15000, SC_NS);
+
+    DEBUG_OUT(1) << "Memory dump: " << std::endl;
+    memory.Dump(std::cout);
+
+    start.write(true);
+    RunCycles(clk, 100000, SC_NS);
+    return 0;
+}
+
+int sc_main_old(int argc, char **argv) {
     using namespace sc_core;
     using namespace sc_dt;
 
@@ -187,9 +337,6 @@ int sc_main(int argc, char **argv) {
     netzp::Mem mem("Memory", netzp::KBYTE);
     netzp::MemController bus("Bus");
 
-    std::vector<std::unique_ptr<Tester>> masters;
-    masters.emplace_back(new Tester("Master1"));
-
     netzp::InOutController *io = new netzp::InOutController("iocon");
     netzp::MemIO *memio = new netzp::MemIO("memio");
 
@@ -228,75 +375,6 @@ int sc_main(int argc, char **argv) {
     bus.data_wr(data_wr);
     bus.r_en(r_en);
     bus.w_en(w_en);
-
-    masters[0]->clk(clk);
-    masters[0]->reply_in(reply[0]);
-    masters[0]->request_out(request[0]);
-    masters[0]->access_granted(access_granted[0]);
-    masters[0]->access_request(access_request[0]);
-
-    io->clk(clk);
-    io->rst(rst);
-    io->replies(replies_signal);
-    io->requests(requests_signal);
-    io->netz_data(netz_data);
-
-    memio->clk(clk);
-    memio->rst(rst);
-    memio->access_granted(access_granted[1]);
-    memio->access_request(access_request[1]);
-    memio->reply(reply[1]);
-    memio->request(request[1]);
-    memio->requests_from_host(requests_signal);
-    memio->replies_to_host(replies_signal);
-
-
-    for (config_int_t i = 0; i < CONFIG_INPUT_PICTURE_WIDTH * CONFIG_INPUT_PICTURE_HEIGHT; i++) {
-        io->data_inputs[i](data_inputs[i]);
-    }
-
-    for (int i = 0; i < port_count; i++) {
-        bus.access_granted[i](access_granted[i]);
-        bus.access_request[i](access_request[i]);
-        bus.requests_in[i](request[i]);
-        bus.replies_out[i](reply[i]);
-    }
-
-    DEBUG_OUT(DEBUG_LEVEL_MSG) << "begin" << std::endl;
-
-    rst = 1;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    rst = 0;
-    RunCycles(clk, 10, sc_core::SC_NS);
-
-    DEBUG_OUT(DEBUG_LEVEL_MSG) << "try write 1" << std::endl;
-
-    netz_data = netz;
-    // requests.data = BytesToRequests({ 0x21, 0x22, 0x23, 0x24, 0x25 }, 0x02);
-    // requests_signal.write(requests);
-    RunCycles(clk, 2000, sc_core::SC_NS);
-
-    DEBUG_OUT(DEBUG_LEVEL_MSG) << "Mem dump:" << std::endl;
-    mem.Dump(std::cout);
-
-    requests.data = ReadRequests(0x02, 5);
-    requests_signal.write(requests);
-    RunCycles(clk, 300, sc_core::SC_NS);
-
-    DEBUG_OUT(1) << "READ:" << std::endl;
-    for (const auto byte : replies_signal.read().data) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << byte.data << " ";
-    }
-    std::cout << std::dec << std::endl;
-
-    data_signal.write(compdata);
-    RunCycles(clk, 10, SC_NS);
-
-    DEBUG_OUT(1) << PRINTVAL(product.read()) << std::endl;
-
-    // delete io;
-    delete memio;
 
     return 0;
 }

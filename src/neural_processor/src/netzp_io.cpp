@@ -97,8 +97,6 @@ NetzwerkData NetzwerkData::Deserialize(const uchar *bytes) {
         data.neurons.emplace_back(std::move(n));
     }
 
-    DEBUG_OUT(1) << data << std::endl;
-
     return data;
 }
 

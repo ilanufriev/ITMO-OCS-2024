@@ -9,11 +9,6 @@
 
 namespace netzp {
 
-std::vector<uchar> RepliesToByes(const std::vector<MemReply>& replies);
-
-std::vector<MemRequest> ReadMemorySpanRequests(mem_addr_t base_addr, size_t size,
-                                               mem_master_id_t master_id);
-
 struct NeuronData {
     using count_type = uchar;
 

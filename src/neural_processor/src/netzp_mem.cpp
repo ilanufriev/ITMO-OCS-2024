@@ -62,9 +62,9 @@ std::ostream& operator << (std::ostream& out, const MemReply& reply) {
 }
 
 std::ostream& operator << (std::ostream& out, const MemRequest& req) {
-    out << PRINTVAL(req.master_id)                 << std::endl
-        << PRINTVAL(req.data_wr)                   << std::endl
-        << PRINTVAL(req.addr)                      << std::endl
+    out << PRINTVAL(req.master_id) << std::endl
+        << PRINTVAL(req.data_wr)   << std::endl
+        << PRINTVAL(req.addr)      << std::endl
         << PRINTVAL(static_cast<int>(req.op_type));
     return out;
 }
@@ -74,18 +74,45 @@ std::vector<MemRequest> ReadMemorySpanRequests(mem_addr_t base_addr, size_t size
     std::vector<MemRequest> result;
     for (mem_addr_t addr = base_addr; addr < (base_addr + size); addr++) {
         auto& req     = result.emplace_back();
-
         req.addr      = addr;
         req.data_wr   = 0;
         req.master_id = master_id;
         req.op_type   = MemOperationType::READ;
     }
 
+    result.shrink_to_fit();
     return result;
 }
 
+std::vector<MemRequest> BytesToWriteRequests(mem_addr_t base_addr,
+                                             const std::vector<uchar>& bytes,
+                                             mem_master_id_t master_id) {
+    std::vector<MemRequest> result;
+    for (mem_addr_t addr = base_addr; addr < (base_addr + bytes.size()); addr++) {
+        auto &req     = result.emplace_back();
+        req.addr      = addr;
+        req.data_wr   = 0;
+        req.master_id = master_id;
+        req.op_type   = MemOperationType::WRITE;
+    }
 
-std::vector<uchar> RepliesToByes(const std::vector<MemReply>& replies) {
+    result.shrink_to_fit();
+    return result;
+}
+
+std::vector<fp_t> BytesToFloatingPoints(const std::vector<uchar>& bytes) {
+    std::vector<fp_t> result;
+
+    offset_t current_offset = 0;
+    for (offset_t off = 0; off < bytes.size(); off += sizeof(fp_t)) {
+        const fp_t *fp = reinterpret_cast<const fp_t *>(bytes.data() + off);
+        result.push_back(*fp);
+    }
+
+    return result;
+}
+
+std::vector<uchar> RepliesToBytes(const std::vector<MemReply>& replies) {
     std::vector<uchar> bytes;
     for (const auto& reply : replies) {
         bytes.push_back(static_cast<uchar>(reply.data.to_uint()));
@@ -333,6 +360,7 @@ void MemIO::MainProcess() {
                 ret.data.shrink_to_fit();
                 replies_to_host->write(ret);
                 replies_fifo_.clear();
+                access_request->write(false);
             }
         }
 

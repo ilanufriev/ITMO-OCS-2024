@@ -36,6 +36,7 @@ constexpr config_int_t CONFIG_INPUT_PICTURE_HEIGHT = 7;
 constexpr config_int_t CONFIG_INPUT_DATA_OFFSET = 0x00;
 constexpr config_int_t CONFIG_COMP_CORE_COUNT = 3;
 constexpr config_int_t CONFIG_CDU_MAX_NEURONS_COUNT = 255;
+constexpr config_int_t CONFIG_NETZ_MAX_OUTPUTS = 3;
 
 // USINGS
 template <typename T>

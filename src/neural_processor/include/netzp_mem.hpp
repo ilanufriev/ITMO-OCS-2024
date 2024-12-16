@@ -61,7 +61,15 @@ struct MemReply {
 
 std::ostream& operator << (std::ostream& out, const MemReply& reply);
 
-std::vector<uchar> RepliesToByes(const std::vector<MemReply>& replies);
+std::vector<uchar> RepliesToBytes(const std::vector<MemReply>& replies);
+
+std::vector<MemRequest> ReadMemorySpanRequests(mem_addr_t base_addr, size_t size,
+                                               mem_master_id_t master_id);
+
+std::vector<MemRequest> BytesToWriteRequests(mem_addr_t base_addr, std::vector<uchar> bytes,
+                                             mem_master_id_t master_id);
+
+std::vector<fp_t> BytesToFloatingPoints(const std::vector<uchar>& bytes);
 
 class Mem : public sc_core::sc_module {
 private:
@@ -149,6 +157,8 @@ private:
 
     sc_core::sc_signal<bool> reply_ready_;
     bool                     reply_ready_next_;
+    bool                     new_request_ = false;
+    bool                     new_reply_   = false;
 
 public:
     // System side
@@ -165,8 +175,6 @@ public:
     sc_signal_port_in<DataVector<MemRequest>> requests_from_host;
     sc_signal_port_out<DataVector<MemReply>>  replies_to_host;
 
-    bool new_request_ = false;
-    bool new_reply_   = false;
 
 private:
 

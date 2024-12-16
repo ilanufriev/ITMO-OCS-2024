@@ -47,12 +47,13 @@ void AccumulationCore::AtData() {
         throw std::invalid_argument(WEIGHTS_AND_INPUTS_DIFFER);
 
     product_next_ = 0;
-    const NeuronData& neuron          = data->read().data;
+    const NeuronData& neuron        = data->read().data;
     const std::vector<fp_t>& inputs = data->read().inputs;
 
     for (int i = 0; i < neuron.weights_count; i++) {
         product_next_ += neuron.weights.at(i) * inputs.at(i);
     }
+
 }
 
 AccumulationCore::AccumulationCore(sc_core::sc_module_name const&) {
@@ -98,13 +99,18 @@ void ComputCore::AtClk() {
 
 void ComputCore::AtOutputReady() {
     output_data_next_ = compdata_current_;
-    output_data_next_.output = accumulator_out_.read();
+    output_data_next_.output = activator_out_.read();
     ready_next_ = true;
+    DEBUG_OUT_MODULE(1) << PRINTVAL(activator_out_) << std::endl;
 }
 
 void ComputCore::AtInputData() {
     compdata_current_ = input_data->read();
     ready_next_ = false;
+}
+
+void ComputCore::AtAccumulatorReady() {
+    DEBUG_OUT_MODULE(1) << PRINTVAL(accumulator_out_) << std::endl;
 }
 
 ComputCore::ComputCore(sc_core::sc_module_name const &name) {
@@ -126,6 +132,12 @@ ComputCore::ComputCore(sc_core::sc_module_name const &name) {
     sensitive << clk.pos();
 
     SC_METHOD(AtOutputReady);
+    sensitive << activator_out_;
+
+    SC_METHOD(AtInputData);
+    sensitive << input_data;
+
+    SC_METHOD(AtAccumulatorReady);
     sensitive << accumulator_out_;
 }
 

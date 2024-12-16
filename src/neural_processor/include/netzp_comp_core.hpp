@@ -90,6 +90,7 @@ public:
     void AtClk();
     void AtInputData();
     void AtOutputReady();
+    void AtAccumulatorReady();
 
     ~ComputCore();
 };
