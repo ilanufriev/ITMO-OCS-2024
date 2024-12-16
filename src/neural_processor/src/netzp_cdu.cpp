@@ -6,6 +6,7 @@
 #include "netzp_utils.hpp"
 #include "sysc/kernel/sc_module.h"
 #include <iomanip>
+#include <stdexcept>
 #include <string>
 
 namespace netzp {
@@ -24,9 +25,13 @@ bool CentralDispatchUnit::CheckAllCoreOutputs() {
         const auto& core_output = core_outputs_[i].read();
         const auto neuron = core_output.data.neuron;
 
+        DEBUG_OUT_MODULE(1) << "neuron[" << +core_output.data.layer << ", "
+                            << +core_output.data.neuron << "] here!" << std::endl;
+
         if (outputs_ready_[neuron] == false && core_ready_[i].read() == true) {
-            outputs_[neuron] = core_output.output;
-            outputs_ready_[neuron] = true;
+            // outputs_[neuron] = core_output.output;
+            // outputs_ready_[neuron] = true;
+            OutputAdd(core_output.output, neuron);
         }
     }
 
@@ -46,15 +51,12 @@ void CentralDispatchUnit::ResetOutputs() {
     }
 
     outputs_size_ = 0;
-    outputs_ready_size_ = 0;
 }
 
 void CentralDispatchUnit::OutputAdd(fp_t value, size_t index) {
-    if (!((outputs_size_ <= index) && ((index + 1) <= outputs_.max_size()))) {
-        return;
-    }
+    if (index >= outputs_.max_size())
+        throw std::invalid_argument("Index " + std::to_string(index) + " out of bounds");
 
-    outputs_size_= index + 1;
     outputs_[index] = value;
     outputs_ready_[index] = true;
 }
@@ -120,8 +122,6 @@ void CentralDispatchUnit::MainProcess() {
         DataVector<MemRequest> netz_req;
         netz_req.data = ReadMemorySpanRequests(InOutController::NETZ_DATA_OFFSET,
                                                     sizeof(neuron_count), MASTER_ID);
-        DEBUG_OUT(1) << netz_req << std::endl;
-
         while (true) {
             sc_core::wait();
             mem_requests->write(netz_req);
@@ -142,7 +142,6 @@ void CentralDispatchUnit::MainProcess() {
         ndata.neuron        = 0;
         ndata.layer         = 0;
         outputs_size_       = 0;
-        outputs_ready_size_ = 0;
 
         offset_t current_offset = neurons_off;
         for (int k = 0; k < neuron_count; k++) {
@@ -154,8 +153,6 @@ void CentralDispatchUnit::MainProcess() {
             DataVector<MemRequest> neuron_req;
             neuron_req.data = ReadMemorySpanRequests(current_offset, neuron_static_size,
                                                      MASTER_ID);
-
-            DEBUG_OUT(1) << neuron_req << std::endl;
 
             NeuronData ndata_next;
             while (true) {
@@ -176,8 +173,6 @@ void CentralDispatchUnit::MainProcess() {
             // If suddenly the layer is now different, we first wait for the previous layer
             // to finish
             if (ndata_next.layer != ndata.layer) {
-                DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_size_) << std::endl;
-                DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_ready_size_) << std::endl;
                 while (true) {
                     sc_core::wait();
 
@@ -194,12 +189,10 @@ void CentralDispatchUnit::MainProcess() {
                         break;
                     }
                 }
-
                 // resume computations
             }
 
             outputs_size_++;
-            outputs_ready_size_++;
 
             DEBUG_OUT_MODULE(1) << "Get weights" << std::endl;
 
@@ -226,8 +219,6 @@ void CentralDispatchUnit::MainProcess() {
 
             ndata = ndata_next;
 
-            DEBUG_OUT(1) << "Assign neuron " << ndata << std::endl;
-
             // Now let's check the cores
             bool neuron_assigned = false;
             for (int i = 0; i < CORE_COUNT; i++) {
@@ -242,20 +233,21 @@ void CentralDispatchUnit::MainProcess() {
 
                     if (!core_cold[i] && core_output.data.layer == ndata.layer) {
                         // Put into outputs
-                        outputs_[core_output.data.neuron] = core_output.output;
-                        outputs_ready_[core_output.data.neuron] = true;
+                        OutputAdd(core_output.output, core_output.data.neuron);
                         DEBUG_OUT_MODULE(1) << "outputs[" << +core_output.data.neuron << "] = " << outputs_[core_output.data.neuron] << std::endl;
                     }
 
                     // Assign new neuron to one of the cores
                     if (!neuron_assigned) {
+
                         ComputationData cdata;
                         cdata.data   = ndata;
                         cdata.inputs = std::vector(inputs_.begin(), inputs_.begin() + inputs_size_);
                         core_inputs_[i].write(cdata);
                         neuron_assigned = true;
 
-                        DEBUG_OUT_MODULE(1) << "Assigned " << cdata << " to core " << i << std::endl;
+                        DEBUG_OUT_MODULE(1) << "Assigned compdata: " << cdata
+                                            << " to core " << i << std::endl;
                         core_cold[i] = false;
                     }
                 }

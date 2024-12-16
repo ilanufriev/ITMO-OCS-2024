@@ -35,7 +35,6 @@ private:
 
     size_t inputs_size_;
     size_t outputs_size_;
-    size_t outputs_ready_size_;
 
     bool finished_ = false;
 
