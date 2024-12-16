@@ -95,6 +95,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    Netzwerk netz;
     std::string cmd(argv[ARGV_CMD]);
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ToUpper);
 
@@ -116,8 +117,8 @@ int main(int argc, char **argv) {
         dump_out.open(argv[ARGV_DUMP_FILE]);
 
         if (!dump_out) {
-            std::cerr 	<< "Could not open file "
-                    << argv[ARGV_DUMP_FILE] << std::endl;
+            std::cerr << "Could not open file "
+                      << argv[ARGV_DUMP_FILE] << std::endl;
             return 1;
         }
 
@@ -132,20 +133,20 @@ int main(int argc, char **argv) {
         dump_in.open(argv[ARGV_DUMP_FILE]);
 
         if (!dump_in) {
-            std::cerr 	<< "Could not open file "
-                    << argv[ARGV_DUMP_FILE] << std::endl;
+            std::cerr << "Could not open file "
+                      << argv[ARGV_DUMP_FILE] << std::endl;
             return 1;
         }
     } else if (cmd != CMD_RUN) {
-        std::cerr 	<< "Unknown command.\n";
+        std::cerr << "Unknown command.\n";
         return 1;
     }
 
     in_file.open(argv[ARGV_IN_FILE]);
 
     if (!in_file) {
-        std::cerr 	<< "Could not open file "
-                << argv[ARGV_IN_FILE] << std::endl;
+        std::cerr << "Could not open file "
+                  << argv[ARGV_IN_FILE] << std::endl;
         return 1;
     }
 
@@ -161,24 +162,26 @@ int main(int argc, char **argv) {
     }
 
     if (input.size() != INPUT_COUNT) {
-        std::cerr 	<< "Warning, input size is "
-                << input.size() << std::endl;
+        std::cerr << "Warning, input size is "
+                  << input.size() << std::endl;
     }
-
-    Netzwerk netz;
-
-    for (size_t i = 0; i < INPUT_COUNT; i++) {
-        netz.AddInput(0);
-    }
-
-    netz	.AddLayer(3 * 2)
-        .AddLayer(3);
 
     double alpha = 0.2;
 
     if (load_weights) {
-        netz.ReadWeights(dump_in);
+        netz = std::move(netz::Netzwerk::ReadStructure(dump_in));
+        for (size_t i = 0; i < INPUT_COUNT; i++) {
+            netz.AddInput(0);
+        }
+
         goto skip;
+    }
+
+    netz.AddLayer(3 * 2)
+        .AddLayer(3);
+
+    for (size_t i = 0; i < INPUT_COUNT; i++) {
+        netz.AddInput(0);
     }
 
     for (size_t epoch = 0; epoch < EPOCH_LIMIT; epoch++) {
@@ -266,7 +269,7 @@ skip:
     }
 
     if (dump_weights) {
-        netz.DumpWeights(dump_out);
+        netz.DumpStructure(dump_out);
     }
 
     return 0;

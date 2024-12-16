@@ -31,10 +31,13 @@ private:
     std::array<fp_t, MAX_NEURONS>       inputs_;
     std::array<fp_t, MAX_NEURONS>       outputs_;
     std::array<bool, MAX_NEURONS>       outputs_ready_;
-    std::array<NeuronData, MAX_NEURONS> neurons_;
+
+    std::array<NeuronData, CORE_COUNT>  neurons_;
+    std::array<bool, CORE_COUNT> core_cold_;
 
     size_t inputs_size_;
     size_t outputs_size_;
+    size_t neurons_size_;
 
     bool finished_ = false;
 
@@ -50,7 +53,12 @@ public:
 private:
     bool CheckAllCoreOutputs();
     void ResetOutputs();
-    void OutputAdd(fp_t output, size_t index);
+    void ResetNeurons();
+    void AddOutput(fp_t output, size_t index);
+    void AddNeuron(const NeuronData& data);
+    NeuronData PopNeuron();
+
+    void AssignNeurons();
 
 public:
     explicit CentralDispatchUnit(sc_core::sc_module_name const&);

@@ -5,6 +5,7 @@
 #include "netzp_mem.hpp"
 #include "netzp_utils.hpp"
 #include "sysc/kernel/sc_module.h"
+#include "sysc/kernel/sc_wait.h"
 #include <iomanip>
 #include <stdexcept>
 #include <string>
@@ -25,13 +26,11 @@ bool CentralDispatchUnit::CheckAllCoreOutputs() {
         const auto& core_output = core_outputs_[i].read();
         const auto neuron = core_output.data.neuron;
 
-        DEBUG_OUT_MODULE(1) << "neuron[" << +core_output.data.layer << ", "
-                            << +core_output.data.neuron << "] here!" << std::endl;
+        // DEBUG_OUT_MODULE(1) << "neuron[" << +core_output.data.layer << ", "
+        //                     << +core_output.data.neuron << "] here!" << std::endl;
 
         if (outputs_ready_[neuron] == false && core_ready_[i].read() == true) {
-            // outputs_[neuron] = core_output.output;
-            // outputs_ready_[neuron] = true;
-            OutputAdd(core_output.output, neuron);
+            AddOutput(core_output.output, neuron);
         }
     }
 
@@ -40,6 +39,11 @@ bool CentralDispatchUnit::CheckAllCoreOutputs() {
             all_ready = false;
         }
     }
+
+    // DEBUG_OUT_MODULE(1) << "Outputs ready:" << std::endl;
+    // for (int i = 0; i < outputs_size_; i++) {
+    //     DEBUG_OUT_MODULE(1) << "outputs_ready_[" << i << "] = " << outputs_ready_[i] << std::endl;
+    // }
 
     return all_ready;
 }
@@ -53,7 +57,27 @@ void CentralDispatchUnit::ResetOutputs() {
     outputs_size_ = 0;
 }
 
-void CentralDispatchUnit::OutputAdd(fp_t value, size_t index) {
+void CentralDispatchUnit::ResetNeurons() {
+    neurons_size_ = 0;
+}
+
+void CentralDispatchUnit::AddNeuron(const NeuronData& data) {
+    if (neurons_size_ >= neurons_.max_size()) {
+        throw std::invalid_argument("neurons size exceeded");
+    }
+
+    neurons_[neurons_size_++] = data;
+}
+
+NeuronData CentralDispatchUnit::PopNeuron() {
+    if (neurons_size_ == 0) {
+        throw std::invalid_argument("Popping an empty stack");
+    }
+
+    return neurons_[--neurons_size_];
+}
+
+void CentralDispatchUnit::AddOutput(fp_t value, size_t index) {
     if (index >= outputs_.max_size())
         throw std::invalid_argument("Index " + std::to_string(index) + " out of bounds");
 
@@ -64,6 +88,34 @@ void CentralDispatchUnit::OutputAdd(fp_t value, size_t index) {
 void CentralDispatchUnit::AtStart() {
     if (start->read() == false) {
         finished_ = false;
+    }
+}
+
+void CentralDispatchUnit::AssignNeurons() {
+    for (int i = 0; i < CORE_COUNT; i++) {
+        const auto& core_output = core_outputs_[i].read();
+        const auto neuron = core_output.data.neuron;
+        const bool core_ready = core_ready_[i].read();
+
+        if (core_ready || core_cold_[i]) {
+            if (!core_cold_[i]) {
+                DEBUG_OUT_MODULE(1) << "GOT OUTPUT " << core_output << " from core " << i << std::endl;
+                AddOutput(core_output.output, neuron);
+            }
+
+            if (neurons_size_ != 0) {
+                NeuronData ndata = PopNeuron();
+
+                ComputationData cdata;
+                cdata.data = std::move(ndata);
+                cdata.inputs = std::vector(inputs_.begin(), inputs_.begin() + inputs_size_);
+
+                core_inputs_[i].write(cdata);
+                core_cold_[i] = false;
+
+                DEBUG_OUT_MODULE(1) << "ASSIGNED " << ndata << " to core " << i << std::endl;
+            }
+        }
     }
 }
 
@@ -78,11 +130,8 @@ void CentralDispatchUnit::MainProcess() {
     while (true) {
         has_mem_reply_ = false;
 
-        // Means that the cores have not yet been assigned with any task
-        std::array<bool, CORE_COUNT> core_cold;
-
         for (int i = 0; i < CORE_COUNT; i++) {
-            core_cold[i] = true;
+            core_cold_[i] = true;
         }
 
         sc_core::wait();
@@ -176,6 +225,11 @@ void CentralDispatchUnit::MainProcess() {
                 while (true) {
                     sc_core::wait();
 
+                    while (neurons_size_ > 0) {
+                        sc_core::wait();
+                        AssignNeurons();
+                    }
+
                     // Check if all of them finished
                     bool all_ready = CheckAllCoreOutputs();
 
@@ -216,40 +270,13 @@ void CentralDispatchUnit::MainProcess() {
             ndata_next.weights = BytesToFloatingPoints(weights_bytes);
 
             // Finally, a neuron
-
             ndata = ndata_next;
 
-            // Now let's check the cores
-            bool neuron_assigned = false;
-            for (int i = 0; i < CORE_COUNT; i++) {
-                const auto& core_output = core_outputs_[i].read();
-
-                // If core ready
-                if (core_ready_[i].read() == true || core_cold[i]) {
-
-                    // Only put into outputs if it is from the current layer
-                    // (cores may still hold values from previous layers which we do not
-                    // want to bleed into next layer)
-
-                    if (!core_cold[i] && core_output.data.layer == ndata.layer) {
-                        // Put into outputs
-                        OutputAdd(core_output.output, core_output.data.neuron);
-                        DEBUG_OUT_MODULE(1) << "outputs[" << +core_output.data.neuron << "] = " << outputs_[core_output.data.neuron] << std::endl;
-                    }
-
-                    // Assign new neuron to one of the cores
-                    if (!neuron_assigned) {
-
-                        ComputationData cdata;
-                        cdata.data   = ndata;
-                        cdata.inputs = std::vector(inputs_.begin(), inputs_.begin() + inputs_size_);
-                        core_inputs_[i].write(cdata);
-                        neuron_assigned = true;
-
-                        DEBUG_OUT_MODULE(1) << "Assigned compdata: " << cdata
-                                            << " to core " << i << std::endl;
-                        core_cold[i] = false;
-                    }
+            AddNeuron(ndata);
+            if (neurons_size_ == neurons_.max_size()) {
+                while (neurons_size_ > 0) {
+                    sc_core::wait();
+                    AssignNeurons();
                 }
             }
 

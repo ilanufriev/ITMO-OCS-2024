@@ -1,6 +1,7 @@
 #include "netz.hpp"
 #include "netz_formulas.hpp"
 #include <initializer_list>
+#include <iostream>
 #include <stdexcept>
 
 netz::Netzwerk::Netzwerk(std::initializer_list<double> inputs,
@@ -118,6 +119,93 @@ std::ostream& netz::Netzwerk::DumpWeights(std::ostream& out) const {
         }
     }
     return out;
+}
+
+std::ostream& netz::Netzwerk::DumpStructure(std::ostream& out) const {
+    bool is_first = true;
+    out << ">" << inputs__.size() << std::endl;
+    for (int k = 0; k < layers__.size(); k++) {
+        for (int i = 0; i < layers__.at(k).size(); i++) {
+        out << "@" << k << "/" << i << std::endl;
+
+            for (int j = 0; j < layers__.at(k).at(i).InputSize(); j++) {
+                if (!is_first) {
+                    out << std::endl;
+                }
+
+                // is_first = false;
+                out << "#" << layers__.at(k).at(i).GetWeight(j) << std::endl;
+            }
+        }
+    }
+
+    return out;
+}
+
+netz::Netzwerk netz::Netzwerk::ReadStructure(std::istream& in) {
+    std::string line;
+    std::vector<std::vector<std::vector<double>>> weights;
+    int input_count = 0;
+
+    int layer = 0;
+    int neuron = 0;
+    while (std::getline(in, line)) {
+        if (line.empty()) continue; // Skip empty lines
+        std::cout << "Line: " << line << std::endl;
+
+        if (line[0] == '>') {
+            std::string input_count_str = line.substr(1); // remove '>'
+            input_count = std::stoi(input_count_str);
+
+        } else if (line[0] == '@') {
+            // Parse the indices
+            std::string indices = line.substr(1); // Remove '@'
+            size_t delimiterPos = indices.find('/');
+            if (delimiterPos == std::string::npos) {
+                throw std::runtime_error("Invalid index format.");
+            }
+
+            layer  = std::stoi(indices.substr(0, delimiterPos));
+            neuron = std::stoi(indices.substr(delimiterPos + 1));
+
+            // Ensure the array is large enough
+            if (layer >= weights.size()) {
+                weights.resize(layer + 1);
+            }
+
+            if (neuron >= weights[layer].size()) {
+                weights[layer].resize(neuron + 1);
+            }
+
+        } else if (line[0] == '#') {
+            double value = std::stod(line.substr(1)); // Remove '#'
+            weights[layer][neuron].push_back(value);
+
+        }
+    }
+
+    Netzwerk netz;
+
+    for (layer = 0; layer < weights.size(); layer++) {
+        netz.AddLayer(weights.at(layer).size());
+    }
+
+    for (int i = 0; i < input_count; i++) {
+        netz.AddInput(0);
+    }
+
+    for (layer = 0; layer < weights.size(); layer++) {
+        for (neuron = 0; neuron < weights.at(layer).size(); neuron++) {
+            for (int weight = 0; weight < weights.at(layer).at(neuron).size(); weight++) {
+                netz.layers__.at(layer).at(neuron).SetWeight(
+                        weight,
+                        weights.at(layer).at(neuron).at(weight)
+                    );
+            }
+        }
+    }
+
+    return netz;
 }
 
 netz::Netzwerk& netz::Netzwerk::ReadWeights(std::istream& in) {
