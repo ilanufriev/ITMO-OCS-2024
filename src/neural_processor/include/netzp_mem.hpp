@@ -66,7 +66,8 @@ std::vector<uchar> RepliesToBytes(const std::vector<MemReply>& replies);
 std::vector<MemRequest> ReadMemorySpanRequests(mem_addr_t base_addr, size_t size,
                                                mem_master_id_t master_id);
 
-std::vector<MemRequest> BytesToWriteRequests(mem_addr_t base_addr, std::vector<uchar> bytes,
+std::vector<MemRequest> BytesToWriteRequests(mem_addr_t base_addr,
+                                             const std::vector<uchar>& bytes,
                                              mem_master_id_t master_id);
 
 std::vector<fp_t> BytesToFloatingPoints(const std::vector<uchar>& bytes);

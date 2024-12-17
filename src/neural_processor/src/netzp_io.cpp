@@ -1,7 +1,9 @@
 #include "netzp_io.hpp"
+#include "netzp_cdu.hpp"
 #include "netzp_config.hpp"
 #include "netzp_mem.hpp"
 #include "netzp_utils.hpp"
+#include "sysc/kernel/sc_wait_cthread.h"
 #include <stdexcept>
 #include <system_error>
 
@@ -152,6 +154,24 @@ void InOutController::MainProcess() {
 
     while (true) {
         sc_core::wait();
+
+        if (rst->read()) {
+            input_data_changed_ = true;
+            netz_data_changed_  = true;
+            new_reply_          = false;
+            input_data_requests_.data.clear();
+            netz_data_requests_.data.clear();
+
+            finished_writing->write(false);
+            finished_reading->write(false);
+
+            continue;
+        }
+
+        if (finished_writing.read() && finished_reading.read()) {
+            continue;
+        }
+
         new_reply_ = false;
 
         DataVector<MemRequest> input_data_requests;
@@ -183,7 +203,9 @@ void InOutController::MainProcess() {
             netz_data_changed_ = false;
         }
 
+
         while (!input_data_requests.data.empty()) {
+            DEBUG_OUT(DEBUG_MSG_LEVEL) << "Sending inputs" << std::endl;
             sc_core::wait();
             requests->write(input_data_requests);
 
@@ -194,6 +216,7 @@ void InOutController::MainProcess() {
         }
 
         while (!netz_data_requests.data.empty()) {
+            DEBUG_OUT(DEBUG_MSG_LEVEL) << "Sending netz" << std::endl;
             sc_core::wait();
 
             requests->write(netz_data_requests);
@@ -202,6 +225,48 @@ void InOutController::MainProcess() {
                 netz_data_requests.data.clear();
                 new_reply_ = false;
             }
+        }
+
+        finished_writing.write(true);
+
+        if (got_output.read()) {
+            DataVector<MemRequest> output_req;
+            CentralDispatchUnit::size_type output_size;
+            output_req.data = ReadMemorySpanRequests(IO_OUTPUTS_BASE_ADDR,
+                                                        sizeof(output_size),
+                                                        MASTER_ID);
+            while (true) {
+                sc_core::wait();
+                requests->write(output_req);
+                if (new_reply_) {
+                    const auto bytes = RepliesToBytes(replies->read().data);
+                    output_size = *(reinterpret_cast<const CentralDispatchUnit::size_type *>(bytes.data()));
+                    new_reply_ = false;
+                    break;
+                }
+            }
+
+
+            output_req.data.clear();
+
+            output_req.data = ReadMemorySpanRequests(IO_OUTPUTS_BASE_ADDR + 1,
+                                                        sizeof(fp_t) * output_size,
+                                                        MASTER_ID);
+
+            DataVector<fp_t> outputs_dv;
+            while (true) {
+                sc_core::wait();
+                requests->write(output_req);
+                if (new_reply_) {
+                    const auto bytes = RepliesToBytes(replies->read().data);
+                    outputs_dv.data = BytesToFloatingPoints(bytes);
+                    new_reply_ = false;
+                    break;
+                }
+            }
+
+            outputs->write(outputs_dv);
+            finished_reading->write(true);
         }
     }
 }

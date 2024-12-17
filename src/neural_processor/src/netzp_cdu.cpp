@@ -13,7 +13,6 @@
 namespace netzp {
 
 void CentralDispatchUnit::AtCoreReady() {
-    core_finished_ = true;
 }
 
 void CentralDispatchUnit::AtMemReply() {
@@ -26,9 +25,6 @@ bool CentralDispatchUnit::CheckAllCoreOutputs() {
         const auto& core_output = core_outputs_[i].read();
         const auto neuron = core_output.data.neuron;
 
-        // DEBUG_OUT_MODULE(1) << "neuron[" << +core_output.data.layer << ", "
-        //                     << +core_output.data.neuron << "] here!" << std::endl;
-
         if (outputs_ready_[neuron] == false && core_ready_[i].read() == true) {
             AddOutput(core_output.output, neuron);
         }
@@ -39,11 +35,6 @@ bool CentralDispatchUnit::CheckAllCoreOutputs() {
             all_ready = false;
         }
     }
-
-    // DEBUG_OUT_MODULE(1) << "Outputs ready:" << std::endl;
-    // for (int i = 0; i < outputs_size_; i++) {
-    //     DEBUG_OUT_MODULE(1) << "outputs_ready_[" << i << "] = " << outputs_ready_[i] << std::endl;
-    // }
 
     return all_ready;
 }
@@ -77,18 +68,12 @@ NeuronData CentralDispatchUnit::PopNeuron() {
     return neurons_[--neurons_size_];
 }
 
-void CentralDispatchUnit::AddOutput(fp_t value, size_t index) {
+void CentralDispatchUnit::AddOutput(fp_t value, CentralDispatchUnit::size_type index) {
     if (index >= outputs_.max_size())
         throw std::invalid_argument("Index " + std::to_string(index) + " out of bounds");
 
     outputs_[index] = value;
     outputs_ready_[index] = true;
-}
-
-void CentralDispatchUnit::AtStart() {
-    if (start->read() == false) {
-        finished_ = false;
-    }
 }
 
 void CentralDispatchUnit::AssignNeurons() {
@@ -127,19 +112,32 @@ void CentralDispatchUnit::MainProcess() {
     const offset_t neuron_data_weights_count_off = 2;
     const offset_t neuron_data_weights_off       = 3;
 
+    DataVector<MemRequest> ready_byte_reqs;
+    ready_byte_reqs.data.emplace_back();
+    ready_byte_reqs.data.back().data_wr   = 0x00;
+    ready_byte_reqs.data.back().addr      = InOutController::IO_FLAGS_ADDR;
+    ready_byte_reqs.data.back().master_id = MASTER_ID;
+    ready_byte_reqs.data.back().op_type   = MemOperationType::READ;
+
     while (true) {
         has_mem_reply_ = false;
 
-        for (int i = 0; i < CORE_COUNT; i++) {
-            core_cold_[i] = true;
-        }
-
         sc_core::wait();
+
         if (rst.read()) {
+            for (int i = 0; i < CORE_COUNT; i++) {
+                core_cold_[i] = true;
+            }
+
+            finished->write(false);
+
+            has_mem_reply_ = false;
+            ResetOutputs();
+            ResetNeurons();
             continue;
         }
 
-        if (!(start.read() == true) || finished_ == true) {
+        if (!start.read() || finished.read()) {
             continue;
         }
 
@@ -188,9 +186,9 @@ void CentralDispatchUnit::MainProcess() {
 
         // And now we start fetching neurons one by one
         NeuronData ndata;
-        ndata.neuron        = 0;
-        ndata.layer         = 0;
-        outputs_size_       = 0;
+        ndata.neuron  = 0;
+        ndata.layer   = 0;
+        outputs_size_ = 0;
 
         offset_t current_offset = neurons_off;
         for (int k = 0; k < neuron_count; k++) {
@@ -291,7 +289,7 @@ void CentralDispatchUnit::MainProcess() {
 
         while (true) {
             DEBUG_OUT_MODULE(1) << "Waiting for the cores to finish" << std::endl;
-            DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_size_) << std::endl;
+            DEBUG_OUT_MODULE(1) << PRINTVAL(+outputs_size_) << std::endl;
             sc_core::wait();
             bool all_ready = CheckAllCoreOutputs();
             if (all_ready) {
@@ -301,16 +299,34 @@ void CentralDispatchUnit::MainProcess() {
 
         DEBUG_OUT_MODULE(1) << "Got outputs:" << std::endl;
 
-        // DEBUG_OUT_MODULE(1) << "Outputs ready:" << std::endl;
-        // for (int i = 0; i < 50; i++) {
-        //     DEBUG_OUT_MODULE(1) << "outputs_ready_[" << i << "] = " << outputs_ready_[i] << std::endl;
-        // }
-
         DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_[0]) << std::endl;
         DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_[1]) << std::endl;
         DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_[2]) << std::endl;
 
-        finished_ = true;
+        std::vector<uchar> output_bytes;
+        for (const auto byte : ToBytesVector(outputs_size_))
+            output_bytes.push_back(byte);
+
+
+        for (int i = 0; i < outputs_size_; i++) {
+            for (const auto byte : ToBytesVector(outputs_[i]))
+                output_bytes.push_back(byte);
+        }
+
+        DataVector<MemRequest> output_req;
+        output_req.data = BytesToWriteRequests(InOutController::IO_OUTPUTS_BASE_ADDR,
+                                                 output_bytes, MASTER_ID);
+
+        while (true) {
+            sc_core::wait();
+            mem_requests->write(output_req);
+
+            if (has_mem_reply_) {
+                finished->write(true);
+                has_mem_reply_ = false;
+                break;
+            }
+        }
     }
 }
 

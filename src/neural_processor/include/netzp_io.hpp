@@ -49,10 +49,6 @@ std::ostream& operator<<(std::ostream& out, const NetzwerkData& netz_data);
 
 class InOutController : public sc_core::sc_module {
 private:
-    MemRequest              *request_next_;
-    bool                     access_request_next_;
-    bool                     ready_to_send_;
-
     bool                     input_data_changed_;
     bool                     netz_data_changed_;
     bool                     new_reply_;
@@ -61,11 +57,16 @@ private:
     DataVector<MemRequest>   netz_data_requests_;
 
 public:
-    static constexpr config_int_t INPUT_COUNT      = CONFIG_INPUT_PICTURE_HEIGHT
-                                                   * CONFIG_INPUT_PICTURE_WIDTH;
-    static constexpr config_int_t INPUTS_OFFSET    = CONFIG_INPUT_DATA_OFFSET;
-    static constexpr config_int_t NETZ_DATA_OFFSET = INPUTS_OFFSET + INPUT_COUNT;
-    static constexpr config_int_t MASTER_ID        = 1;
+    static constexpr config_int_t INPUT_COUNT          = CONFIG_INPUT_PICTURE_HEIGHT
+                                                       * CONFIG_INPUT_PICTURE_WIDTH;
+    static constexpr config_int_t INPUTS_OFFSET        = CONFIG_INPUT_DATA_OFFSET;
+    static constexpr config_int_t NETZ_DATA_OFFSET     = INPUTS_OFFSET + INPUT_COUNT;
+    static constexpr config_int_t MASTER_ID            = 1;
+    static constexpr config_int_t IO_BASE_ADDR         = CONFIG_IO_RSVD_MEMORY_BASE_ADDR;
+    static constexpr config_int_t IO_SIZE              = CONFIG_IO_RSVD_MEMORY_SIZE;
+    static constexpr config_int_t IO_FLAGS_ADDR        = IO_BASE_ADDR;
+    static constexpr config_int_t IO_OUTPUTS_BASE_ADDR = IO_FLAGS_ADDR + 1;
+    static constexpr uchar        IO_READY_BIT         = (uchar) (1 << 0);
 
     // System side
     sc_core::sc_in<bool> clk;
@@ -77,6 +78,12 @@ public:
 
     sc_signal_port_out<DataVector<MemRequest>> requests;
     sc_signal_port_in<DataVector<MemReply>>    replies;
+
+    sc_core::sc_in<bool>  got_output;
+    sc_core::sc_out<bool> finished_writing;
+    sc_core::sc_out<bool> finished_reading;
+    sc_signal_port_out<DataVector<fp_t>> outputs;
+
 
 private:
     std::vector<MemRequest> BytesToRequests(const std::vector<uchar>& bytes, offset_t offset) const;

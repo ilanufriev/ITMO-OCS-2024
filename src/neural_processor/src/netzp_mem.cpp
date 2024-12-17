@@ -88,10 +88,11 @@ std::vector<MemRequest> BytesToWriteRequests(mem_addr_t base_addr,
                                              const std::vector<uchar>& bytes,
                                              mem_master_id_t master_id) {
     std::vector<MemRequest> result;
-    for (mem_addr_t addr = base_addr; addr < (base_addr + bytes.size()); addr++) {
+    int i = 0;
+    for (mem_addr_t addr = base_addr; addr < (base_addr + bytes.size()); addr++, i++) {
         auto &req     = result.emplace_back();
         req.addr      = addr;
-        req.data_wr   = 0;
+        req.data_wr   = bytes[i];
         req.master_id = master_id;
         req.op_type   = MemOperationType::WRITE;
     }

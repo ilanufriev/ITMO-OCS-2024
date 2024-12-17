@@ -17,6 +17,8 @@ public:
     static constexpr config_int_t MAX_OUTPUTS = CONFIG_NETZ_MAX_OUTPUTS;
     static constexpr config_int_t MASTER_ID   = 2;
 
+    using size_type = uchar;
+
 private:
     ComputCore *compcore[CORE_COUNT];
 
@@ -24,8 +26,6 @@ private:
     sc_core::sc_signal<ComputationData> core_outputs_[CORE_COUNT];
     sc_core::sc_signal<bool>            core_ready_  [CORE_COUNT];
 
-    bool is_first_layer_ = true;
-    bool core_finished_  = false;
     bool has_mem_reply_  = false;
 
     std::array<fp_t, MAX_NEURONS>       inputs_;
@@ -35,16 +35,15 @@ private:
     std::array<NeuronData, CORE_COUNT>  neurons_;
     std::array<bool, CORE_COUNT> core_cold_;
 
-    size_t inputs_size_;
-    size_t outputs_size_;
-    size_t neurons_size_;
-
-    bool finished_ = false;
+    size_type inputs_size_;
+    size_type outputs_size_;
+    size_type neurons_size_;
 
 public:
     sc_core::sc_in<bool> clk;
     sc_core::sc_in<bool> rst;
     sc_core::sc_in<bool> start;
+    sc_core::sc_out<bool> finished;
 
     // MemIO connection ports
     sc_signal_port_in<DataVector<MemReply>>    mem_replies;
@@ -54,10 +53,9 @@ private:
     bool CheckAllCoreOutputs();
     void ResetOutputs();
     void ResetNeurons();
-    void AddOutput(fp_t output, size_t index);
+    void AddOutput(fp_t output, size_type index);
     void AddNeuron(const NeuronData& data);
     NeuronData PopNeuron();
-
     void AssignNeurons();
 
 public:

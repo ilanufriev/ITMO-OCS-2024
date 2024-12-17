@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <fstream>
 #include <iomanip>
@@ -107,8 +108,6 @@ int sc_main(int argc, char **argv) {
         return 1;
     }
 
-
-
     std::ifstream network_file(network_filename);
     if (!network_file) {
         std::cout << "No such file: " << network_filename << std::endl;
@@ -138,6 +137,13 @@ int sc_main(int argc, char **argv) {
 
     sc_signal<bool> rst(0);
     sc_signal<bool> clk(0);
+    sc_signal<bool> cdu_start(0);
+    sc_signal<bool> cdu_finished(0);
+    sc_signal<bool> io_finished_writing(0);
+    sc_signal<bool> io_finished_reading(0);
+    sc_signal<bool> io_got_output(0);
+    sc_signal<DataVector<fp_t>> io_outputs;
+
 
     sc_signal<netzp::NetzwerkData> netz_data;
     sc_vector<sc_signal<bool>> input_signals("inputs", netzp::InOutController::INPUT_COUNT);
@@ -149,17 +155,14 @@ int sc_main(int argc, char **argv) {
 
     netzp::CentralDispatchUnit cdu("cdu");
 
-    sc_signal<bool> start;
-
-    start.write(0);
-
     cdu.clk(clk);
     cdu.rst(rst);
     cdu.mem_replies(replies_to_host[1]);
     cdu.mem_requests(requests_from_host[1]);
-    cdu.start(start);
+    cdu.start(cdu_start);
+    cdu.finished(cdu_finished);
 
-    netzp::Mem memory("memory", 2 * netzp::KBYTE);
+    netzp::Mem memory("memory", 3 * netzp::KBYTE);
 
     memory.clk(clk);
     memory.rst(rst);
@@ -228,6 +231,10 @@ int sc_main(int argc, char **argv) {
 
     iocon.requests(requests_from_host[0]);
     iocon.replies(replies_to_host[0]);
+    iocon.finished_writing(io_finished_writing);
+    iocon.finished_reading(io_finished_reading);
+    iocon.got_output(io_got_output);
+    iocon.outputs(io_outputs);
 
     rst = 1;
     clk = 0;
@@ -235,146 +242,34 @@ int sc_main(int argc, char **argv) {
 
     rst = 0;
     clk = 0;
-    RunCycles(clk, 5, SC_NS);
-
     netz_data.write(nd);
-    RunCycles(clk, 15000, SC_NS);
+    while (io_finished_writing.read() == false) {
+        RunCycles(clk, 1, SC_NS);
+    }
+
+    cdu_start.write(true);
+    while (cdu_finished.read() == false) {
+        RunCycles(clk, 1, SC_NS);
+    }
+
+    io_got_output.write(true);
+    while (io_finished_reading.read() == false) {
+        RunCycles(clk, 1, SC_NS);
+    }
 
     DEBUG_OUT(1) << "Memory dump: " << std::endl;
     memory.Dump(std::cout);
 
-    start.write(true);
-    RunCycles(clk, 100000, SC_NS);
-    return 0;
-}
+    auto outputs = io_outputs.read().data;
 
-int sc_main_old(int argc, char **argv) {
-    using namespace sc_core;
-    using namespace sc_dt;
-
-    netzp::NeuronData neurons[4];
-    neurons[0] = {
-        .layer   = 0,
-        .neuron  = 0,
-        .weights_count = 3,
-        .weights = {
-            3.14, 2.34, 1.23
-        }
-    };
-
-    neurons[1] = {
-        .layer   = 0,
-        .neuron  = 1,
-        .weights_count = 3,
-        .weights = {
-            3.24, 1.34, 3.23
-        }
-    };
-
-    neurons[2] = {
-        .layer   = 1,
-        .neuron  = 0,
-        .weights_count = 3,
-        .weights = {
-            3.14, 2.4, 5.23
-        }
-    };
-
-    neurons[3] = {
-        .layer   = 1,
-        .neuron  = 1,
-        .weights_count = 2,
-        .weights = {
-            33.14, 32.34
-        }
-    };
-
-    netzp::NetzwerkData netz = {
-        .neurons_count = 4,
-        .neurons = {
-            neurons[0],
-            neurons[1],
-            neurons[2],
-            neurons[3]
-        }
-    };
-
-    auto serialized_neuron = neurons[0].Serialize();
-    assert(neurons[0] == netzp::NeuronData::Deserialize(serialized_neuron.data()));
-
-    auto serialized_netz = netz.Serialize();
-    assert(netz == netzp::NetzwerkData::Deserialize(serialized_netz.data()));
-
-    sc_signal<netzp::NetzwerkData> netz_data;
-
-    sc_signal<bool> data_inputs[CONFIG_INPUT_PICTURE_HEIGHT * CONFIG_INPUT_PICTURE_WIDTH];
-    for (config_int_t i = 0; i < CONFIG_INPUT_PICTURE_HEIGHT * CONFIG_INPUT_PICTURE_HEIGHT; i++) {
-        data_inputs[i] = i % 2;
+    for (int i = 0; i < outputs.size(); i++) {
+        std::cout << "outputs[" << i << "] = " << outputs[i] << std::endl;
     }
 
-    sc_signal<netzp::mem_data_t> data_rd(0);
-    sc_signal<netzp::mem_data_t> data_wr(0);
-    sc_signal<netzp::mem_addr_t> addr(0);
-    sc_signal<bool>              w_en(0);
-    sc_signal<bool>              r_en(0);
-    sc_signal<bool>              ack_mem_to_con(0);
-    sc_signal<bool>              ack_con_to_mem(0);
-
-    const size_t port_count = CONFIG_MEMORY_CONTROLLER_MAX_CONNECTIONS;
-
-    sc_vector<sc_signal<bool>>              access_granted("acc_granted", port_count);
-    sc_vector<sc_signal<bool>>              access_request("acc_request", port_count);
-    sc_vector<sc_signal<netzp::MemReply>>   reply("reply", port_count);
-    sc_vector<sc_signal<netzp::MemRequest>> request("request", port_count);
-
-    sc_signal<bool> rst(0);
-    sc_signal<bool> clk(0);
-
-    DataVector<netzp::MemRequest>            requests;
-    sc_signal<DataVector<netzp::MemRequest>> requests_signal;
-    sc_signal<DataVector<netzp::MemReply>>   replies_signal;
-
-    netzp::Mem mem("Memory", netzp::KBYTE);
-    netzp::MemController bus("Bus");
-
-    netzp::InOutController *io = new netzp::InOutController("iocon");
-    netzp::MemIO *memio = new netzp::MemIO("memio");
-
-    netzp::AccumulationCore core("AccCore");
-    netzp::ComputationData compdata;
-    compdata.data = netz.neurons.at(0);
-    compdata.inputs = { 1, 2, 3 };
-    compdata.output = 0;
-
-    sc_signal<fp_t> product;
-    sc_signal<netzp::ComputationData> data_signal;
-
-    core.clk(clk);
-    core.rst(rst);
-    core.data(data_signal);
-    core.result(product);
-
-    mem.clk(clk);
-    mem.rst(rst);
-
-    mem.ack_in(ack_con_to_mem);
-    mem.ack_out(ack_mem_to_con);
-    mem.addr(addr);
-    mem.data_rd(data_rd);
-    mem.data_wr(data_wr);
-    mem.r_en(r_en);
-    mem.w_en(w_en);
-
-    bus.clk(clk);
-    bus.rst(rst);
-
-    bus.ack_in(ack_mem_to_con);
-    bus.ack_out(ack_con_to_mem);
-    bus.addr(addr);
-    bus.data_rd(data_rd);
-    bus.data_wr(data_wr);
-    bus.r_en(r_en);
-    bus.w_en(w_en);
+    auto iter = std::max_element(outputs.begin(), outputs.end());
+    if ((iter - outputs.begin()) == 0) std::cout << "It's a circle" << std::endl;
+    if ((iter - outputs.begin()) == 1) std::cout << "It's a square" << std::endl;
+    if ((iter - outputs.begin()) == 2) std::cout << "It's a triangle" << std::endl;
 
     return 0;
 }
