@@ -162,7 +162,7 @@ int sc_main(int argc, char **argv) {
     cdu.start(cdu_start);
     cdu.finished(cdu_finished);
 
-    netzp::Mem memory("memory", 3 * netzp::KBYTE);
+    netzp::Mem memory("memory", 10 * netzp::KBYTE);
 
     memory.clk(clk);
     memory.rst(rst);

@@ -53,6 +53,7 @@ private:
     bool CheckAllCoreOutputs();
     void ResetOutputs();
     void ResetNeurons();
+    void ResetCores();
     void AddOutput(fp_t output, size_type index);
     void AddNeuron(const NeuronData& data);
     NeuronData PopNeuron();

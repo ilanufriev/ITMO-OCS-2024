@@ -6,7 +6,6 @@
 #include "netzp_utils.hpp"
 #include "sysc/kernel/sc_module.h"
 #include "sysc/kernel/sc_wait.h"
-#include <iomanip>
 #include <stdexcept>
 #include <string>
 
@@ -26,6 +25,7 @@ bool CentralDispatchUnit::CheckAllCoreOutputs() {
         const auto neuron = core_output.data.neuron;
 
         if (outputs_ready_[neuron] == false && core_ready_[i].read() == true) {
+            DEBUG_OUT_MODULE(1) << "Got output " << core_output << " from core " << i << std::endl;
             AddOutput(core_output.output, neuron);
         }
     }
@@ -83,8 +83,7 @@ void CentralDispatchUnit::AssignNeurons() {
         const bool core_ready = core_ready_[i].read();
 
         if (core_ready || core_cold_[i]) {
-            if (!core_cold_[i]) {
-                DEBUG_OUT_MODULE(1) << "GOT OUTPUT " << core_output << " from core " << i << std::endl;
+            if (!core_cold_[i] && core_output.data.layer == neurons_.front().layer) {
                 AddOutput(core_output.output, neuron);
             }
 
@@ -101,6 +100,12 @@ void CentralDispatchUnit::AssignNeurons() {
                 DEBUG_OUT_MODULE(1) << "ASSIGNED " << ndata << " to core " << i << std::endl;
             }
         }
+    }
+}
+
+void CentralDispatchUnit::ResetCores() {
+    for (int i = 0; i < core_cold_.max_size(); i++) {
+        core_cold_[i] = true;
     }
 }
 
@@ -125,13 +130,11 @@ void CentralDispatchUnit::MainProcess() {
         sc_core::wait();
 
         if (rst.read()) {
-            for (int i = 0; i < CORE_COUNT; i++) {
-                core_cold_[i] = true;
-            }
 
             finished->write(false);
 
             has_mem_reply_ = false;
+            ResetCores();
             ResetOutputs();
             ResetNeurons();
             continue;
@@ -238,6 +241,14 @@ void CentralDispatchUnit::MainProcess() {
                         inputs_size_ = outputs_size_;
 
                         ResetOutputs();
+                        ResetCores();
+                        ResetNeurons();
+
+                        DEBUG_OUT_MODULE(1) << "Outputs ready after reset:" << std::endl;
+                        for (int i = 0; i < 50; i++) {
+                            DEBUG_OUT_MODULE(1) << "outputs_ready_[" << i << "] = " << outputs_ready_[i] << std::endl;
+                        }
+
                         break;
                     }
                 }
@@ -287,6 +298,10 @@ void CentralDispatchUnit::MainProcess() {
             current_offset += ndata.SizeInBytes();
         }
 
+        // this wait() call is necessary for the last layer of neurons to be
+        // checked correctly.
+        sc_core::wait();
+
         while (true) {
             DEBUG_OUT_MODULE(1) << "Waiting for the cores to finish" << std::endl;
             DEBUG_OUT_MODULE(1) << PRINTVAL(+outputs_size_) << std::endl;
@@ -297,11 +312,6 @@ void CentralDispatchUnit::MainProcess() {
             }
         }
 
-        DEBUG_OUT_MODULE(1) << "Got outputs:" << std::endl;
-
-        DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_[0]) << std::endl;
-        DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_[1]) << std::endl;
-        DEBUG_OUT_MODULE(1) << PRINTVAL(outputs_[2]) << std::endl;
 
         std::vector<uchar> output_bytes;
         for (const auto byte : ToBytesVector(outputs_size_))
