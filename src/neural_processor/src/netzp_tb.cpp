@@ -1,22 +1,21 @@
 #include <algorithm>
 #include <cstddef>
 #include <fstream>
-#include <iomanip>
-#include <memory>
 #include <systemc>
 #include <iostream>
 #include "netzp_cdu.hpp"
-#include "netzp_comp_core.hpp"
 #include "netzp_config.hpp"
 #include "netzp_io.hpp"
 #include "netzp_mem.hpp"
 #include "netzp_utils.hpp"
 #include "sysc/kernel/sc_time.h"
 
+unsigned long long TOTAL_CYCLE_COUNT = 0;
+
 void RunCycles(sc_core::sc_signal<bool>& clk, int cycles, sc_core::sc_time_unit tu) {
     using namespace sc_core;
 
-    for (int i = 0; i < cycles; i++) {
+    for (int i = 0; i < cycles; i++, TOTAL_CYCLE_COUNT++) {
         clk = 0;
         sc_start(1, tu);
         clk = 1;
@@ -101,6 +100,11 @@ int sc_main(int argc, char **argv) {
 
     const char *input_filename = argv[ARGV_IN_FILENAME];
     const char *network_filename = argv[ARGV_NETWORK_FILENAME];
+
+    if (argc < 3) {
+        std::cout << "Usage: ./netzp [input_file] [network_dump_file]" << std::endl;
+        return 0;
+    }
 
     std::ifstream inputs_file(input_filename);
     if (!inputs_file) {
@@ -270,6 +274,8 @@ int sc_main(int argc, char **argv) {
     if ((iter - outputs.begin()) == 0) std::cout << "It's a circle" << std::endl;
     if ((iter - outputs.begin()) == 1) std::cout << "It's a square" << std::endl;
     if ((iter - outputs.begin()) == 2) std::cout << "It's a triangle" << std::endl;
+
+    std::cout << "TOTAL CLOCK CYCLES: " << std::dec << TOTAL_CYCLE_COUNT << std::endl;
 
     return 0;
 }

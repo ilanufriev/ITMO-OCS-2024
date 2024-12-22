@@ -18,18 +18,21 @@ void CentralDispatchUnit::AtMemReply() {
     has_mem_reply_ = true;
 }
 
-bool CentralDispatchUnit::CheckAllCoreOutputs() {
-    bool all_ready = true;
+void CentralDispatchUnit::CheckAllCoreOutputs() {
     for (int i = 0; i < CORE_COUNT; i++) {
         const auto& core_output = core_outputs_[i].read();
         const auto neuron = core_output.data.neuron;
 
-        if (outputs_ready_[neuron] == false && core_ready_[i].read() == true) {
+        if (outputs_ready_[neuron] == false && core_ready_[i].read() == true && !core_cold_[i]) {
             DEBUG_OUT_MODULE(1) << "Got output " << core_output << " from core " << i << std::endl;
             AddOutput(core_output.output, neuron);
+            core_cold_[i] = true;
         }
     }
+}
 
+bool CentralDispatchUnit::IsAllReady() const {
+    bool all_ready = true;
     for (int i = 0; i < outputs_size_; i++) {
         if (outputs_ready_[i] == false) {
             all_ready = false;
@@ -82,29 +85,23 @@ void CentralDispatchUnit::AssignNeurons() {
         const auto neuron = core_output.data.neuron;
         const bool core_ready = core_ready_[i].read();
 
-        if (core_ready || core_cold_[i]) {
-            if (!core_cold_[i] && core_output.data.layer == neurons_.front().layer) {
-                AddOutput(core_output.output, neuron);
-            }
+        if ((core_ready || core_cold_[i]) && (neurons_size_ != 0)) {
+            NeuronData ndata = PopNeuron();
 
-            if (neurons_size_ != 0) {
-                NeuronData ndata = PopNeuron();
+            ComputationData cdata;
+            cdata.data = std::move(ndata);
+            cdata.inputs = std::vector(inputs_.begin(), inputs_.begin() + inputs_size_);
 
-                ComputationData cdata;
-                cdata.data = std::move(ndata);
-                cdata.inputs = std::vector(inputs_.begin(), inputs_.begin() + inputs_size_);
+            core_inputs_[i].write(cdata);
+            core_cold_[i] = false;
 
-                core_inputs_[i].write(cdata);
-                core_cold_[i] = false;
-
-                DEBUG_OUT_MODULE(1) << "ASSIGNED " << ndata << " to core " << i << std::endl;
-            }
+            DEBUG_OUT_MODULE(1) << "ASSIGNED " << ndata << " to core " << i << std::endl;
         }
     }
 }
 
 void CentralDispatchUnit::ResetCores() {
-    for (int i = 0; i < core_cold_.max_size(); i++) {
+    for (int i = 0; i < CORE_COUNT; i++) {
         core_cold_[i] = true;
     }
 }
@@ -226,13 +223,13 @@ void CentralDispatchUnit::MainProcess() {
                 while (true) {
                     sc_core::wait();
 
-                    while (neurons_size_ > 0) {
-                        sc_core::wait();
-                        AssignNeurons();
-                    }
+                    CheckAllCoreOutputs();
+                    AssignNeurons();
+
+                    sc_core::wait();
 
                     // Check if all of them finished
-                    bool all_ready = CheckAllCoreOutputs();
+                    bool all_ready = IsAllReady();
 
                     // If finished, get the results and put them into inputs array
                     // for the next layer
@@ -285,6 +282,7 @@ void CentralDispatchUnit::MainProcess() {
             if (neurons_size_ == neurons_.max_size()) {
                 while (neurons_size_ > 0) {
                     sc_core::wait();
+                    CheckAllCoreOutputs();
                     AssignNeurons();
                 }
             }
@@ -303,15 +301,18 @@ void CentralDispatchUnit::MainProcess() {
         sc_core::wait();
 
         while (true) {
-            DEBUG_OUT_MODULE(1) << "Waiting for the cores to finish" << std::endl;
-            DEBUG_OUT_MODULE(1) << PRINTVAL(+outputs_size_) << std::endl;
             sc_core::wait();
-            bool all_ready = CheckAllCoreOutputs();
+
+            CheckAllCoreOutputs();
+            AssignNeurons();
+
+            sc_core::wait();
+
+            bool all_ready = IsAllReady();
             if (all_ready) {
                 break;
             }
         }
-
 
         std::vector<uchar> output_bytes;
         for (const auto byte : ToBytesVector(outputs_size_))
@@ -325,7 +326,7 @@ void CentralDispatchUnit::MainProcess() {
 
         DataVector<MemRequest> output_req;
         output_req.data = BytesToWriteRequests(InOutController::IO_OUTPUTS_BASE_ADDR,
-                                                 output_bytes, MASTER_ID);
+                                               output_bytes, MASTER_ID);
 
         while (true) {
             sc_core::wait();

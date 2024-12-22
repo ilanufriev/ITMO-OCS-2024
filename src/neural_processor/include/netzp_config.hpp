@@ -36,7 +36,7 @@ constexpr config_int_t CONFIG_IO_RSVD_MEMORY_BASE_ADDR = 0x00;
 constexpr config_int_t CONFIG_INPUT_PICTURE_WIDTH = 7;
 constexpr config_int_t CONFIG_INPUT_PICTURE_HEIGHT = 7;
 constexpr config_int_t CONFIG_INPUT_DATA_OFFSET = CONFIG_IO_RSVD_MEMORY_BASE_ADDR + CONFIG_IO_RSVD_MEMORY_SIZE;
-constexpr config_int_t CONFIG_COMP_CORE_COUNT = 3;
+constexpr config_int_t CONFIG_COMP_CORE_COUNT = 1;
 constexpr config_int_t CONFIG_CDU_MAX_NEURONS_COUNT = 255;
 constexpr config_int_t CONFIG_NETZ_MAX_OUTPUTS = 3;
 

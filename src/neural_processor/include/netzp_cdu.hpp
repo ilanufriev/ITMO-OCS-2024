@@ -50,7 +50,8 @@ public:
     sc_signal_port_out<DataVector<MemRequest>> mem_requests;
 
 private:
-    bool CheckAllCoreOutputs();
+    void CheckAllCoreOutputs();
+    bool IsAllReady() const;
     void ResetOutputs();
     void ResetNeurons();
     void ResetCores();
