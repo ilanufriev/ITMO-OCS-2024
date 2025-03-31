@@ -23,14 +23,15 @@ public:
     double GetInput(size_t index) const;
 
     template<typename NumberContainer>
-    void AdjustWeights(double alpha,
-            const NumberContainer& expected_values);
+    void AdjustWeights(double alpha, const NumberContainer& expected_values);
 
     std::vector<double> GetOuputs();
 
     std::ostream& DumpWeights(std::ostream& out) const;
+    std::ostream& DumpStructure(std::ostream& out) const;
 
     Netzwerk& ReadWeights(std::istream& in);
+    static netz::Netzwerk ReadStructure(std::istream& in);
 private:
     void Update();
 
@@ -42,7 +43,7 @@ private:
 class netz::Neuron {
 public:
     Neuron() = delete;
-    Neuron(std::function<double(double)> activation_func)
+    explicit Neuron(std::function<double(double)> activation_func)
         : activation_func__(activation_func) {}
 
     Neuron& AddInput(double input);
@@ -54,11 +55,11 @@ public:
     double GetOutput() const;
     size_t InputSize() const;
 private:
-    std::vector<double>		inputs__;
-    std::vector<double>		weights__;
+    std::vector<double>             inputs__;
+    std::vector<double>             weights__;
     std::function<double(double)>	activation_func__;
-    mutable double			output__;
-    mutable bool			needs_recalculation__ = true;
+    mutable double                  output__;
+    mutable bool                    needs_recalculation__ = true;
 };
 
 template<typename NumberContainer>
